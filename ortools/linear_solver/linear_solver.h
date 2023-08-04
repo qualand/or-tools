@@ -1440,7 +1440,9 @@ class MPSolverParameters {
     /// Advanced usage: incrementality from one solve to the next.
     INCREMENTALITY = 1002,
     /// Advanced usage: enable or disable matrix scaling.
-    SCALING = 1003
+    SCALING = 1003,
+    /// Advanced usage: Set branch and bound solver heuristic emphasis
+    HEUREMPHASIS = 1004
   };
 
   /// For each categorical parameter, enumeration of possible values.
@@ -1481,6 +1483,18 @@ class MPSolverParameters {
     SCALING_ON = 1
   };
 
+  /// Advanced usage: Heuristic emphasis -> based on Xpress https://www.fico.com/fico-xpress-optimization/docs/latest/solver/optimizer/HTML/HEUREMPHASIS.html
+  enum HeurEmphasisValues {
+    /// Optimizer default strategy
+    HEUREMPHASIS_DEFAULT = -1,
+    /// Disables all heuristics
+    HEUREMPHASIS_DISABLE_ALL = 0,
+    /// Focus on reducing the primal-dual gap in the early part of the search.
+    HEUREMPHASIS_REDUCE_GAP_FOCUS = 1,
+    /// Extremely aggressive search heuristics
+    HEUREMPHASIS_EXTREMELY_AGGRESSIVE = 2
+  };
+
   // Placeholder value to indicate that a parameter is set to
   // the default value defined in the wrapper.
   static const double kDefaultDoubleParamValue;
@@ -1500,6 +1514,7 @@ class MPSolverParameters {
   static const double kDefaultDualTolerance;
   static const PresolveValues kDefaultPresolve;
   static const IncrementalityValues kDefaultIncrementality;
+  static const HeurEmphasisValues kDefaultHeurEmphasis;
 
   /// The constructor sets all parameters to their default value.
   MPSolverParameters();
@@ -1544,6 +1559,7 @@ class MPSolverParameters {
   int scaling_value_;
   int lp_algorithm_value_;
   int incrementality_value_;
+  int heuremphasis_value_;
 
   // Boolean value indicating whether each parameter is set to the
   // solver's default value. Only parameters for which the wrapper

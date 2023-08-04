@@ -1967,6 +1967,7 @@ void MPSolverInterface::SetMIPParameters(const MPSolverParameters& param) {
     SetRelativeMipGap(
         param.GetDoubleParam(MPSolverParameters::RELATIVE_MIP_GAP));
   }
+  //SetHeurEmphasis(param.GetIntegerParam(MPSolverParameters::HEUREMPHASIS));
 }
 
 void MPSolverInterface::SetUnsupportedDoubleParam(
@@ -2016,6 +2017,9 @@ const MPSolverParameters::PresolveValues MPSolverParameters::kDefaultPresolve =
 const MPSolverParameters::IncrementalityValues
     MPSolverParameters::kDefaultIncrementality =
         MPSolverParameters::INCREMENTALITY_ON;
+const MPSolverParameters::HeurEmphasisValues
+    MPSolverParameters::kDefaultHeurEmphasis = 
+        MPSolverParameters::HEUREMPHASIS_DEFAULT;
 
 const double MPSolverParameters::kDefaultDoubleParamValue = -1.0;
 const int MPSolverParameters::kDefaultIntegerParamValue = -1;
@@ -2031,6 +2035,7 @@ MPSolverParameters::MPSolverParameters()
       scaling_value_(kDefaultIntegerParamValue),
       lp_algorithm_value_(kDefaultIntegerParamValue),
       incrementality_value_(kDefaultIncrementality),
+      heuremphasis_value_(kDefaultHeurEmphasis),
       lp_algorithm_is_default_(true) {}
 
 void MPSolverParameters::SetDoubleParam(MPSolverParameters::DoubleParam param,
@@ -2090,6 +2095,16 @@ void MPSolverParameters::SetIntegerParam(MPSolverParameters::IntegerParam param,
       incrementality_value_ = value;
       break;
     }
+    case HEUREMPHASIS: {
+      if (value != HEUREMPHASIS_DEFAULT && value != HEUREMPHASIS_DISABLE_ALL &&
+          value != HEUREMPHASIS_REDUCE_GAP_FOCUS &&
+          value != HEUREMPHASIS_EXTREMELY_AGGRESSIVE) {
+        LOG(ERROR) << "Trying to set a supported parameter: " << param
+                   << " to an unknown value: " << value;
+      }
+      heuremphasis_value_ = value;
+      break;
+    }
     default: {
       LOG(ERROR) << "Trying to set an unknown parameter: " << param << ".";
     }
@@ -2136,6 +2151,10 @@ void MPSolverParameters::ResetIntegerParam(
       incrementality_value_ = kDefaultIncrementality;
       break;
     }
+    case HEUREMPHASIS: {
+      heuremphasis_value_ = kDefaultHeurEmphasis;
+      break;
+    }
     default: {
       LOG(ERROR) << "Trying to reset an unknown parameter: " << param << ".";
     }
@@ -2150,6 +2169,7 @@ void MPSolverParameters::Reset() {
   ResetIntegerParam(SCALING);
   ResetIntegerParam(LP_ALGORITHM);
   ResetIntegerParam(INCREMENTALITY);
+  ResetIntegerParam(HEUREMPHASIS);
 }
 
 double MPSolverParameters::GetDoubleParam(
@@ -2186,6 +2206,9 @@ int MPSolverParameters::GetIntegerParam(
     }
     case SCALING: {
       return scaling_value_;
+    }
+    case HEUREMPHASIS: {
+      return heuremphasis_value_;
     }
     default: {
       LOG(ERROR) << "Trying to get an unknown parameter: " << param << ".";
