@@ -1427,6 +1427,9 @@ MPSolver::ResultStatus XpressInterface::Solve(MPSolverParameters const& param) {
     CHECK_STATUS(XPRSsetintcontrol(mLp, XPRS_MAXTIME,
                                    -1.0 * solver_->time_limit_in_secs()));
   }
+  // Set Heuristic Emphasis
+  CHECK_STATUS(XPRSsetintcontrol(mLp, XPRS_HEUREMPHASIS,
+      param.GetIntegerParam(MPSolverParameters::HEUREMPHASIS)));
 
   timer.Restart();
   // Solve.
