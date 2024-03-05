@@ -16,6 +16,7 @@
 
 #include <vector>
 
+#include "absl/log/check.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/strong_vector.h"
 #include "ortools/sat/integer.h"
@@ -65,14 +66,14 @@ class PseudoCosts {
   std::vector<VariableBoundChange> GetBoundChanges(Literal decision);
 
  private:
-  // Updates the cost of a given variable.
-  void UpdateCostForVar(IntegerVariable var, double new_cost);
-
   // Reference of integer trail to access the current bounds of variables.
   const SatParameters& parameters_;
   IntegerTrail* integer_trail_;
   IntegerEncoder* encoder_;
 
+  std::vector<IntegerVariable> relevant_variables_;
+  absl::StrongVector<IntegerVariable, bool> is_relevant_;
+  absl::StrongVector<IntegerVariable, double> scores_;
   absl::StrongVector<IntegerVariable, IncrementalAverage> pseudo_costs_;
 };
 

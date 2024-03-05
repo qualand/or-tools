@@ -93,6 +93,9 @@ target_compile_options(flatzinc PUBLIC ${FLATZINC_COMPILE_OPTIONS})
 ## Properties
 if(NOT APPLE)
   set_target_properties(flatzinc PROPERTIES VERSION ${PROJECT_VERSION})
+  if(UNIX)
+    set_target_properties(flatzinc PROPERTIES INSTALL_RPATH "$ORIGIN")
+  endif()
 else()
   # Clang don't support version x.y.z with z > 255
   set_target_properties(flatzinc PROPERTIES
@@ -115,15 +118,7 @@ endif()
 add_library(${PROJECT_NAMESPACE}::flatzinc ALIAS flatzinc)
 
 
-if(APPLE)
-  set(CMAKE_INSTALL_RPATH
-    "@loader_path/../${CMAKE_INSTALL_LIBDIR};@loader_path")
-elseif(UNIX)
-  set(CMAKE_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:$ORIGIN/../lib64:$ORIGIN/../lib:$ORIGIN")
-endif()
-
-
-# fzn-ortools Binary
+# fzn-cp-sat Binary
 add_executable(fzn
   ortools/flatzinc/fz.cc
   )
@@ -137,7 +132,7 @@ set_target_properties(fzn PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  OUTPUT_NAME fzn-${PROJECT_NAME}
+  OUTPUT_NAME fzn-cp-sat
   )
 target_compile_features(fzn PUBLIC cxx_std_17)
 target_compile_definitions(fzn PUBLIC ${FLATZINC_COMPILE_DEFINITIONS})
@@ -146,6 +141,17 @@ target_compile_options(fzn PUBLIC ${FLATZINC_COMPILE_OPTIONS})
 target_link_libraries(fzn PRIVATE ${PROJECT_NAMESPACE}::flatzinc)
 ## Alias
 add_executable(${PROJECT_NAME}::fzn ALIAS fzn)
+## INSTALL_RPATH
+if(APPLE)
+  set_target_properties(fzn PROPERTIES
+                        INSTALL_RPATH "@loader_path/../${CMAKE_INSTALL_LIBDIR};@loader_path")
+elseif(UNIX)
+  cmake_path(RELATIVE_PATH CMAKE_INSTALL_FULL_LIBDIR
+             BASE_DIRECTORY ${CMAKE_INSTALL_FULL_BINDIR}
+             OUTPUT_VARIABLE libdir_relative_path)
+  set_target_properties(fzn PROPERTIES
+                        INSTALL_RPATH "$ORIGIN/${libdir_relative_path}")
+endif()
 
 
 # Parser-main Binary
@@ -162,7 +168,7 @@ set_target_properties(fzn-parser_test PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
-  OUTPUT_NAME fzn-parser-${PROJECT_NAME}
+  OUTPUT_NAME fzn-parser-cp-sat
   )
 target_compile_features(fzn-parser_test PUBLIC cxx_std_17)
 target_compile_definitions(fzn-parser_test PUBLIC ${FLATZINC_COMPILE_DEFINITIONS})
@@ -176,10 +182,10 @@ add_executable(${PROJECT_NAME}::fzn-parser_test ALIAS fzn-parser_test)
 # MiniZinc solver configuration
 file(RELATIVE_PATH FZ_REL_INSTALL_BINARY
   ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/minizinc/solvers
-  ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/fzn-${PROJECT_NAME})
+  ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/fzn-cp-sat)
 configure_file(
-  ortools/flatzinc/ortools.msc.in
-  ${PROJECT_BINARY_DIR}/ortools.msc
+  ortools/flatzinc/cpsat.msc.in
+  ${PROJECT_BINARY_DIR}/cpsat.msc
   @ONLY)
 
 # Install rules
@@ -193,7 +199,7 @@ install(TARGETS flatzinc fzn #fzn-parser_test
   )
 
 install(DIRECTORY ortools/flatzinc/mznlib/
-  DESTINATION ${CMAKE_INSTALL_DATADIR}/minizinc/ortools
+  DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/minizinc/cpsat
   FILES_MATCHING PATTERN "*.mzn")
-install(FILES ${PROJECT_BINARY_DIR}/ortools.msc
-  DESTINATION ${CMAKE_INSTALL_DATADIR}/minizinc/solvers)
+install(FILES ${PROJECT_BINARY_DIR}/cpsat.msc
+  DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/minizinc/solvers)

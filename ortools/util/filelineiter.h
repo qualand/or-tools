@@ -26,14 +26,11 @@
 #define OR_TOOLS_UTIL_FILELINEITER_H_
 
 #include <algorithm>
-#include <memory>
+#include <cstdint>
 #include <string>
 
-#include "absl/status/statusor.h"
-#include "absl/strings/match.h"
 #include "ortools/base/file.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/status_macros.h"
 
 // Implements the minimum interface for a range-based for loop iterator.
 class FileLineIterator {
@@ -132,7 +129,7 @@ class FileLines {
   //     ...
   //   }
   //
-  FileLines(const std::string& filename, File* const file,
+  FileLines(absl::string_view filename, File* const file,
             const int options = FileLineIterator::DEFAULT)
       : file_(file), options_(options) {
     if (!file_) {

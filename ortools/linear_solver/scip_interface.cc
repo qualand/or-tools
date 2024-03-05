@@ -16,6 +16,7 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -31,7 +32,6 @@
 #include "ortools/base/cleanup.h"
 #include "ortools/base/commandlineflags.h"
 #include "ortools/base/hash.h"
-#include "ortools/base/integral_types.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/status_macros.h"
 #include "ortools/base/timer.h"
@@ -45,6 +45,7 @@
 #include "scip/cons_indicator.h"
 #include "scip/scip.h"
 #include "scip/scip_copy.h"
+#include "scip/scip_numerics.h"
 #include "scip/scip_param.h"
 #include "scip/scip_prob.h"
 #include "scip/scipdefplugins.h"
@@ -71,6 +72,8 @@ class SCIPInterface : public MPSolverInterface {
   std::optional<MPSolutionResponse> DirectlySolveProto(
       const MPModelRequest& request, std::atomic<bool>* interrupt) override;
   void Reset() override;
+
+  double infinity() override;
 
   void SetVariableBounds(int var_index, double lb, double ub) override;
   void SetVariableInteger(int var_index, bool integer) override;
@@ -145,8 +148,7 @@ class SCIPInterface : public MPSolverInterface {
   //  * We also support SCIP's more general callback interface, built on
   //    'constraint handlers'. See ./scip_callback.h and test, these are added
   //    directly to the underlying SCIP object, bypassing SCIPInterface.
-  // The former works by calling the latter. See go/scip-callbacks for
-  // a complete documentation of this design.
+  // The former works by calling the latter.
 
   // MPCallback API
   void SetCallback(MPCallback* mp_callback) override;
@@ -225,12 +227,11 @@ class ScipConstraintHandlerForMPCallback
   std::vector<CallbackRangeConstraint> SeparateIntegerSolution(
       const ScipConstraintHandlerContext& context, const EmptyStruct&) override;
 
-  MPCallback* const mp_callback() const { return mp_callback_; }
+  MPCallback* mp_callback() const { return mp_callback_; }
 
  private:
   std::vector<CallbackRangeConstraint> SeparateSolution(
-      const ScipConstraintHandlerContext& context,
-      const bool at_integer_solution);
+      const ScipConstraintHandlerContext& context, bool at_integer_solution);
 
   MPCallback* const mp_callback_;
 };
@@ -307,6 +308,8 @@ absl::Status SCIPInterface::CreateSCIP() {
       scip_, maximize_ ? SCIP_OBJSENSE_MAXIMIZE : SCIP_OBJSENSE_MINIMIZE));
   return absl::OkStatus();
 }
+
+double SCIPInterface::infinity() { return SCIPinfinity(scip_); }
 
 SCIP* SCIPInterface::DeleteSCIP(bool return_scip) {
   // NOTE(user): DeleteSCIP() shouldn't "give up" mid-stage if it fails, since
@@ -1118,13 +1121,7 @@ class ScipMPCallbackContext : public MPCallbackContext {
 
 ScipConstraintHandlerForMPCallback::ScipConstraintHandlerForMPCallback(
     MPCallback* mp_callback)
-    : ScipConstraintHandler<EmptyStruct>(
-          // MOE(begin-strip):
-          {/*name=*/"mp_solver_constraint_handler",
-           /*description=*/
-           "A single constraint handler for all MPSolver models."}
-          // MOE(end-strip-and-replace): ScipConstraintHandlerDescription()
-          ),
+    : ScipConstraintHandler<EmptyStruct>(ScipConstraintHandlerDescription()),
       mp_callback_(mp_callback) {}
 
 std::vector<CallbackRangeConstraint>

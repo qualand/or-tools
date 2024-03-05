@@ -23,10 +23,15 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/inlined_vector.h"
+#include "absl/log/check.h"
+#include "absl/meta/type_traits.h"
 #include "absl/strings/str_cat.h"
 #include "absl/types/span.h"
+#include "ortools/base/cleanup.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/strong_vector.h"
 #include "ortools/sat/model.h"
@@ -137,44 +142,49 @@ bool IntegerEncoder::VariableIsFullyEncoded(IntegerVariable var) const {
   return is_fully_encoded_[index];
 }
 
-std::vector<ValueLiteralPair> IntegerEncoder::FullDomainEncoding(
+const std::vector<ValueLiteralPair>& IntegerEncoder::FullDomainEncoding(
     IntegerVariable var) const {
   CHECK(VariableIsFullyEncoded(var));
   return PartialDomainEncoding(var);
 }
 
-std::vector<ValueLiteralPair> IntegerEncoder::PartialDomainEncoding(
+const std::vector<ValueLiteralPair>& IntegerEncoder::PartialDomainEncoding(
     IntegerVariable var) const {
   const PositiveOnlyIndex index = GetPositiveOnlyIndex(var);
-  if (index >= equality_by_var_.size()) return {};
+  if (index >= equality_by_var_.size()) {
+    partial_encoding_.clear();
+    return partial_encoding_;
+  }
 
   int new_size = 0;
-  std::vector<ValueLiteralPair> result;
-  result.assign(equality_by_var_[index].begin(), equality_by_var_[index].end());
-  for (int i = 0; i < result.size(); ++i) {
-    const ValueLiteralPair pair = result[i];
+  partial_encoding_.assign(equality_by_var_[index].begin(),
+                           equality_by_var_[index].end());
+  for (int i = 0; i < partial_encoding_.size(); ++i) {
+    const ValueLiteralPair pair = partial_encoding_[i];
     if (sat_solver_->Assignment().LiteralIsFalse(pair.literal)) continue;
     if (sat_solver_->Assignment().LiteralIsTrue(pair.literal)) {
-      result.clear();
-      result.push_back(pair);
+      partial_encoding_.clear();
+      partial_encoding_.push_back(pair);
       new_size = 1;
       break;
     }
-    result[new_size++] = pair;
+    partial_encoding_[new_size++] = pair;
   }
-  result.resize(new_size);
-  std::sort(result.begin(), result.end(), ValueLiteralPair::CompareByValue());
+  partial_encoding_.resize(new_size);
+  std::sort(partial_encoding_.begin(), partial_encoding_.end(),
+            ValueLiteralPair::CompareByValue());
 
   if (trail_->CurrentDecisionLevel() == 0) {
     // We can cleanup the current encoding in this case.
-    equality_by_var_[index].assign(result.begin(), result.end());
+    equality_by_var_[index].assign(partial_encoding_.begin(),
+                                   partial_encoding_.end());
   }
 
   if (!VariableIsPositive(var)) {
-    std::reverse(result.begin(), result.end());
-    for (ValueLiteralPair& ref : result) ref.value = -ref.value;
+    std::reverse(partial_encoding_.begin(), partial_encoding_.end());
+    for (ValueLiteralPair& ref : partial_encoding_) ref.value = -ref.value;
   }
-  return result;
+  return partial_encoding_;
 }
 
 // Note that by not inserting the literal in "order" we can in the worst case
@@ -355,12 +365,10 @@ void IntegerEncoder::AssociateToIntegerLiteral(Literal literal,
   const IntegerValue min(domain.Min());
   const IntegerValue max(domain.Max());
   if (i_lit.bound <= min) {
-    sat_solver_->AddUnitClause(literal);
-    return;
+    return (void)sat_solver_->AddUnitClause(literal);
   }
   if (i_lit.bound > max) {
-    sat_solver_->AddUnitClause(literal.Negated());
-    return;
+    return (void)sat_solver_->AddUnitClause(literal.Negated());
   }
 
   if (index >= encoding_by_var_.size()) {
@@ -400,7 +408,7 @@ void IntegerEncoder::AssociateToIntegerLiteral(Literal literal,
   if (new_size > reverse_encoding_.size()) {
     reverse_encoding_.resize(new_size);
   }
-  reverse_encoding_[literal.Index()].push_back(canonical_pair.first);
+  reverse_encoding_[literal].push_back(canonical_pair.first);
   reverse_encoding_[literal.NegatedIndex()].push_back(canonical_pair.second);
 
   // Detect the case >= max or <= min and properly register them. Note that
@@ -431,17 +439,17 @@ void IntegerEncoder::AssociateToIntegerEqualValue(Literal literal,
   if (value == 1 && domain.Min() >= 0 && domain.Max() <= 1) {
     if (literal.Index() >= literal_view_.size()) {
       literal_view_.resize(literal.Index().value() + 1, kNoIntegerVariable);
-      literal_view_[literal.Index()] = var;
-    } else if (literal_view_[literal.Index()] == kNoIntegerVariable) {
-      literal_view_[literal.Index()] = var;
+      literal_view_[literal] = var;
+    } else if (literal_view_[literal] == kNoIntegerVariable) {
+      literal_view_[literal] = var;
     }
   }
   if (value == -1 && domain.Min() >= -1 && domain.Max() <= 0) {
     if (literal.Index() >= literal_view_.size()) {
       literal_view_.resize(literal.Index().value() + 1, kNoIntegerVariable);
-      literal_view_[literal.Index()] = NegationOf(var);
-    } else if (literal_view_[literal.Index()] == kNoIntegerVariable) {
-      literal_view_[literal.Index()] = NegationOf(var);
+      literal_view_[literal] = NegationOf(var);
+    } else if (literal_view_[literal] == kNoIntegerVariable) {
+      literal_view_[literal] = NegationOf(var);
     }
   }
 
@@ -461,8 +469,7 @@ void IntegerEncoder::AssociateToIntegerEqualValue(Literal literal,
 
   // Fix literal for value outside the domain.
   if (!domain.Contains(value.value())) {
-    sat_solver_->AddUnitClause(literal.Negated());
-    return;
+    return (void)sat_solver_->AddUnitClause(literal.Negated());
   }
 
   // Update equality_by_var. Note that due to the
@@ -476,8 +483,7 @@ void IntegerEncoder::AssociateToIntegerEqualValue(Literal literal,
 
   // Fix literal for constant domain.
   if (domain.IsFixed()) {
-    sat_solver_->AddUnitClause(literal);
-    return;
+    return (void)sat_solver_->AddUnitClause(literal);
   }
 
   const IntegerLiteral ge = IntegerLiteral::GreaterOrEqual(var, value);
@@ -510,7 +516,15 @@ void IntegerEncoder::AssociateToIntegerEqualValue(Literal literal,
   if (new_size > reverse_equality_encoding_.size()) {
     reverse_equality_encoding_.resize(new_size);
   }
-  reverse_equality_encoding_[literal.Index()].push_back({var, value});
+  reverse_equality_encoding_[literal].push_back({var, value});
+}
+
+bool IntegerEncoder::IsFixedOrHasAssociatedLiteral(IntegerLiteral i_lit) const {
+  if (!VariableIsPositive(i_lit.var)) i_lit = i_lit.Negated();
+  const PositiveOnlyIndex index = GetPositiveOnlyIndex(i_lit.var);
+  if (i_lit.bound <= domains_[index].Min()) return true;
+  if (i_lit.bound > domains_[index].Max()) return true;
+  return GetAssociatedLiteral(i_lit) != kNoLiteralIndex;
 }
 
 // TODO(user): Canonicalization might be slow.
@@ -689,7 +703,7 @@ bool IntegerTrail::Propagate(Trail* trail) {
   if (level > integer_search_levels_.size()) {
     integer_search_levels_.push_back(integer_trail_.size());
     reason_decision_levels_.push_back(literals_reason_starts_.size());
-    CHECK_EQ(trail->CurrentDecisionLevel(), integer_search_levels_.size());
+    CHECK_EQ(level, integer_search_levels_.size());
   }
 
   // This is required because when loading a model it is possible that we add
@@ -872,6 +886,8 @@ bool IntegerTrail::UpdateInitialDomain(IntegerVariable var, Domain domain) {
   if (old_domain == domain) return true;
 
   if (domain.IsEmpty()) return false;
+  const bool lb_changed = domain.Min() > old_domain.Min();
+  const bool ub_changed = domain.Max() < old_domain.Max();
   (*domains_)[index] = domain;
 
   // Update directly the level zero bounds.
@@ -885,6 +901,12 @@ bool IntegerTrail::UpdateInitialDomain(IntegerVariable var, Domain domain) {
   integer_trail_[var.value()].bound = domain.Min();
   vars_[NegationOf(var)].current_bound = -domain.Max();
   integer_trail_[NegationOf(var).value()].bound = -domain.Max();
+
+  // Do not forget to update the watchers.
+  for (SparseBitset<IntegerVariable>* bitset : watchers_) {
+    if (lb_changed) bitset->Set(var);
+    if (ub_changed) bitset->Set(NegationOf(var));
+  }
 
   // Update the encoding.
   return encoder_->UpdateEncodingOnInitialDomainChange(var, domain);
@@ -2093,7 +2115,7 @@ void GenericLiteralWatcher::UpdateCallingNeeds(Trail* trail) {
   while (propagation_trail_index_ < trail->Index()) {
     const Literal literal = (*trail)[propagation_trail_index_++];
     if (literal.Index() >= literal_to_watcher_.size()) continue;
-    for (const auto entry : literal_to_watcher_[literal.Index()]) {
+    for (const auto entry : literal_to_watcher_[literal]) {
       if (!in_queue_[entry.id]) {
         in_queue_[entry.id] = true;
         queue_by_priority_[id_to_priority_[entry.id]].push_back(entry.id);
@@ -2142,6 +2164,17 @@ bool GenericLiteralWatcher::Propagate(Trail* trail) {
   }
 
   UpdateCallingNeeds(trail);
+
+  // Increase the deterministic time depending on some basic fact about our
+  // propagation.
+  int64_t num_propagate_calls = 0;
+  const int64_t old_enqueue = integer_trail_->num_enqueues();
+  auto cleanup =
+      ::absl::MakeCleanup([&num_propagate_calls, old_enqueue, this]() {
+        const int64_t diff = integer_trail_->num_enqueues() - old_enqueue;
+        time_limit_->AdvanceDeterministicTime(1e-8 * num_propagate_calls +
+                                              1e-7 * diff);
+      });
 
   // Note that the priority may be set to -1 inside the loop in order to restart
   // at zero.
@@ -2193,6 +2226,7 @@ bool GenericLiteralWatcher::Propagate(Trail* trail) {
       const int64_t old_boolean_timestamp = trail->Index();
 
       // TODO(user): Maybe just provide one function Propagate(watch_indices) ?
+      ++num_propagate_calls;
       std::vector<int>& watch_indices_ref = id_to_watch_indices_[id];
       const bool result =
           watch_indices_ref.empty()

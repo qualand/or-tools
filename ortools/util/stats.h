@@ -72,14 +72,8 @@
 #include <string>
 #include <vector>
 
-#ifdef HAS_PERF_SUBSYSTEM
-#include "absl/strings/str_replace.h"
-#include "exegesis/exegesis/itineraries/perf_subsystem.h"
-#include "ortools/util/time_limit.h"
-#endif  // HAS_PERF_SUBSYSTEM
-
 #include "absl/strings/string_view.h"
-#include "ortools/base/macros.h"
+#include "absl/time/time.h"
 #include "ortools/base/timer.h"
 
 namespace operations_research {
@@ -139,6 +133,10 @@ class StatsGroup {
 
   explicit StatsGroup(absl::string_view name)
       : name_(name), stats_(), time_distributions_() {}
+
+  // This type is neither copyable nor movable.
+  StatsGroup(const StatsGroup&) = delete;
+  StatsGroup& operator=(const StatsGroup&) = delete;
   ~StatsGroup();
 
   // Registers a Stat, which will appear in the string returned by StatString().
@@ -167,8 +165,6 @@ class StatsGroup {
   PrintOrder print_order_ = SORT_BY_PRIORITY_THEN_VALUE;
   std::vector<Stat*> stats_;
   std::map<std::string, TimeDistribution*> time_distributions_;
-
-  DISALLOW_COPY_AND_ASSIGN(StatsGroup);
 };
 
 // Base class to track and compute statistics about the distribution of a
@@ -239,6 +235,9 @@ class TimeDistribution : public DistributionStat {
 
   // Adds a time in seconds to this distribution.
   void AddTimeInSec(double seconds);
+  void AddTime(absl::Duration duration) {
+    AddTimeInSec(absl::ToDoubleSeconds(duration));
+  }
 
   // Adds a time in CPU cycles to this distribution.
   void AddTimeInCycles(double cycles);
@@ -317,6 +316,12 @@ class EnabledScopedTimeDistributionUpdater {
       : stat_(stat), also_update_(nullptr) {
     stat->StartTimer();
   }
+
+  // This type is neither copyable nor movable.
+  EnabledScopedTimeDistributionUpdater(
+      const EnabledScopedTimeDistributionUpdater&) = delete;
+  EnabledScopedTimeDistributionUpdater& operator=(
+      const EnabledScopedTimeDistributionUpdater&) = delete;
   ~EnabledScopedTimeDistributionUpdater() {
     const double cycles = stat_->StopTimerAndAddElapsedTime();
     if (also_update_ != nullptr) {
@@ -338,46 +343,19 @@ class EnabledScopedTimeDistributionUpdater {
  private:
   TimeDistribution* stat_;
   TimeDistribution* also_update_;
-  DISALLOW_COPY_AND_ASSIGN(EnabledScopedTimeDistributionUpdater);
 };
 
 class DisabledScopedTimeDistributionUpdater {
  public:
   explicit DisabledScopedTimeDistributionUpdater(TimeDistribution* stat) {}
+
+  // This type is neither copyable nor movable.
+  DisabledScopedTimeDistributionUpdater(
+      const DisabledScopedTimeDistributionUpdater&) = delete;
+  DisabledScopedTimeDistributionUpdater& operator=(
+      const DisabledScopedTimeDistributionUpdater&) = delete;
   void AlsoUpdate(TimeDistribution* also_update) {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DisabledScopedTimeDistributionUpdater);
 };
-
-#ifdef HAS_PERF_SUBSYSTEM
-// Helper classes to count instructions during execution of a block of code and
-// add print the results to logs.
-//
-// Note: To enable instruction counting on machines running Debian, execute the
-// following commands to modify the permissions.
-//   sudo echo "1" > /proc/sys/kernel/perf_event_paranoid
-//   sudo echo "0" > /proc/sys/kernel/kptr_restrict
-class EnabledScopedInstructionCounter {
- public:
-  explicit EnabledScopedInstructionCounter(absl::string_view name,
-                                           TimeLimit* time_limit);
-  EnabledScopedInstructionCounter(const EnabledScopedInstructionCounter&) =
-      delete;
-  EnabledScopedInstructionCounter& operator=(
-      const EnabledScopedInstructionCounter&) = delete;
-  ~EnabledScopedInstructionCounter();
-
-  // Used only for testing.
-  double ReadInstructionCount() { return ending_count_ - starting_count_; }
-
- private:
-  TimeLimit* time_limit_;
-  std::string name_;
-  double starting_count_;
-  double ending_count_;
-};
-#endif  // HAS_PERF_SUBSYSTEM
 
 class DisabledScopedInstructionCounter {
  public:

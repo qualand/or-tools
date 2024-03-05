@@ -14,34 +14,111 @@
 #ifndef OR_TOOLS_SAT_UTIL_H_
 #define OR_TOOLS_SAT_UTIL_H_
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <deque>
 #include <limits>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
-#include "ortools/base/logging.h"
-#if !defined(__PORTABLE_PLATFORM__)
-#include "google/protobuf/descriptor.h"
-#endif  // __PORTABLE_PLATFORM__
 #include "absl/container/btree_set.h"
 #include "absl/container/inlined_vector.h"
+#include "absl/log/check.h"
+#include "absl/log/log_streamer.h"
+#include "absl/numeric/int128.h"
 #include "absl/random/bit_gen_ref.h"
 #include "absl/random/random.h"
 #include "absl/types/span.h"
+#include "ortools/base/logging.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
 #include "ortools/sat/sat_parameters.pb.h"
 #include "ortools/util/random_engine.h"
+#include "ortools/util/saturated_arithmetic.h"
 #include "ortools/util/sorted_interval_list.h"
 #include "ortools/util/time_limit.h"
 
 namespace operations_research {
 namespace sat {
 
+// A simple class with always IdentityMap[t] == t.
+// This is to avoid allocating vector with std::iota() in some Apis.
+template <typename T>
+class IdentityMap {
+ public:
+  T operator[](T t) const { return t; }
+};
+
+// Small utility class to store a vector<vector<>> where one can only append new
+// vector and never change previously added ones. This allows to store a static
+// key -> value(s) mapping.
+//
+// This is a lot more compact memorywise and thus faster than vector<vector<>>.
+// Note that we implement a really small subset of the vector<vector<>> API.
+//
+// We support int and StrongType for key K and any copyable type for value V.
+template <typename K = int, typename V = int>
+class CompactVectorVector {
+ public:
+  // Size of the "key" space, always in [0, size()).
+  size_t size() const;
+
+  // Getters, either via [] or via a wrapping to be compatible with older api.
+  //
+  // Warning: Spans are only valid until the next modification!
+  absl::Span<const V> operator[](K key) const;
+  std::vector<absl::Span<const V>> AsVectorOfSpan() const;
+
+  // Restore to empty vector<vector<>>.
+  void clear();
+
+  // Given a flat mapping (keys[i] -> values[i]) with two parallel vectors, not
+  // necessarily sorted by key, regroup the same key so that
+  // CompactVectorVector[key] list all values in the order in which they appear.
+  //
+  // We only check keys.size(), so this can be used with IdentityMap() as
+  // second argument.
+  template <typename Keys, typename Values>
+  void ResetFromFlatMapping(Keys keys, Values values);
+
+  // Append a new entry.
+  // Returns the previous size() as this is convenient for how we use it.
+  int Add(absl::Span<const V> values);
+
+  // Hacky: same as Add() but for sat::Literal or any type from which we can get
+  // a value type V via L.Index().value().
+  template <typename L>
+  int AddLiterals(const std::vector<L>& wrapped_values);
+
+ private:
+  // Convert int and StrongInt to normal int.
+  static int InternalKey(K key);
+
+  // TODO(user): with a sentinel, we can infer
+  // size_[i] = starts_[i + 1] - starts_[i]. This should be slightly faster.
+  // Benchmark and change.
+  std::vector<int> starts_;
+  std::vector<int> sizes_;
+  std::vector<V> buffer_;
+};
+
 // Prints a positive number with separators for easier reading (ex: 1'348'065).
 std::string FormatCounter(int64_t num);
+
+// This is used to format our table first row entry.
+inline std::string FormatName(absl::string_view name) {
+  return absl::StrCat("'", name, "':");
+}
+
+// Display tabular data by auto-computing cell width. Note that we right align
+// everything but the first row/col that is assumed to be the table name and is
+// left aligned.
+std::string FormatTable(std::vector<std::vector<std::string>>& table,
+                        int spacing = 2);
 
 // Returns a in [0, m) such that a * x = 1 modulo m.
 // If gcd(x, m) != 1, there is no inverse, and it returns 0.
@@ -104,6 +181,17 @@ int64_t SafeDoubleToInt64(double value);
 // -ClosestMultiple(-x) which is important for how this is used.
 int64_t ClosestMultiple(int64_t value, int64_t base);
 
+// Assuming n "literal" in [0, n), and a graph such that graph[i] list the
+// literal in [0, n) implied to false when the literal with index i is true,
+// this returns an heuristic decomposition of the literals into disjoint at most
+// ones.
+//
+// Note(user): Symmetrize the matrix if not already, maybe rephrase in term
+// of undirected graph, and clique decomposition.
+std::vector<absl::Span<int>> AtMostOneDecomposition(
+    const std::vector<std::vector<int>>& graph, absl::BitGenRef random,
+    std::vector<int>* buffer);
+
 // Given a linear equation "sum coeff_i * X_i <= rhs. We can rewrite it using
 // ClosestMultiple() as "base * new_terms + error <= rhs" where error can be
 // bounded using the provided bounds on each variables. This will return true if
@@ -133,15 +221,16 @@ class ModelRandomGenerator : public absl::BitGenRef {
   // case since the SatParameters is set first before the solver is created. We
   // also never really need to change the seed afterwards, it is just used to
   // diversify solves with identical parameters on different Model objects.
-  explicit ModelRandomGenerator(Model* model)
+  explicit ModelRandomGenerator(const SatParameters& params)
       : absl::BitGenRef(deterministic_random_) {
-    const auto& params = *model->GetOrCreate<SatParameters>();
     deterministic_random_.seed(params.random_seed());
     if (params.use_absl_random()) {
       absl_random_ = absl::BitGen(absl::SeedSeq({params.random_seed()}));
       absl::BitGenRef::operator=(absl::BitGenRef(absl_random_));
     }
   }
+  explicit ModelRandomGenerator(Model* model)
+      : ModelRandomGenerator(*model->GetOrCreate<SatParameters>()) {}
 
   // This is just used to display ABSL_RANDOM_SALT_OVERRIDE in the log so that
   // it is possible to reproduce a failure more easily while looking at a solver
@@ -197,12 +286,18 @@ int MoveOneUnprocessedLiteralLast(
 // Precondition: Both bound and all added values must be >= 0.
 class MaxBoundedSubsetSum {
  public:
-  MaxBoundedSubsetSum() { Reset(0); }
-  explicit MaxBoundedSubsetSum(int64_t bound) { Reset(bound); }
+  MaxBoundedSubsetSum() : max_complexity_per_add_(/*default=*/50) { Reset(0); }
+  explicit MaxBoundedSubsetSum(int64_t bound, int max_complexity_per_add = 50)
+      : max_complexity_per_add_(max_complexity_per_add) {
+    Reset(bound);
+  }
 
   // Resets to an empty set of values.
   // We look for the maximum sum <= bound.
   void Reset(int64_t bound);
+
+  // Returns the updated max if value was added to the subset-sum.
+  int64_t MaxIfAdded(int64_t candidate) const;
 
   // Add a value to the base set for which subset sums will be taken.
   void Add(int64_t value);
@@ -225,14 +320,73 @@ class MaxBoundedSubsetSum {
   // This assumes filtered values.
   void AddChoicesInternal(absl::Span<const int64_t> values);
 
-  static constexpr int kMaxComplexityPerAdd = 50;
-
+  // Max_complexity we are willing to pay on each Add() call.
+  const int max_complexity_per_add_;
   int64_t gcd_;
   int64_t bound_;
   int64_t current_max_;
   std::vector<int64_t> sums_;
   std::vector<bool> expanded_sums_;
   std::vector<int64_t> filtered_values_;
+};
+
+// Simple DP to keep the set of the first n reachable value (n > 1).
+//
+// TODO(user): Maybe modulo some prime number we can keep more info.
+// TODO(user): Another common case is a bunch of really small values and larger
+// ones, so we could bound the sum of the small values and keep the first few
+// reachable by the big ones. This is similar to some presolve transformations.
+template <int n>
+class FirstFewValues {
+ public:
+  FirstFewValues() { Reset(); }
+
+  void Reset() {
+    reachable_.fill(std::numeric_limits<int64_t>::max());
+    reachable_[0] = 0;
+    new_reachable_[0] = 0;
+  }
+
+  // We assume the given positive value can be added as many time as wanted.
+  //
+  // TODO(user): Implement Add() with an upper bound on the multiplicity.
+  void Add(const int64_t positive_value) {
+    DCHECK_GT(positive_value, 0);
+    if (positive_value >= reachable_.back()) return;
+
+    // We copy from reachable_[i] to new_reachable_[j].
+    // The position zero is already copied.
+    int i = 1;
+    int j = 1;
+    for (int base = 0; j < n && base < n; ++base) {
+      const int64_t candidate = CapAdd(new_reachable_[base], positive_value);
+      while (j < n && i < n && reachable_[i] < candidate) {
+        new_reachable_[j++] = reachable_[i++];
+      }
+      if (j < n) {
+        // Eliminate duplicates.
+        while (i < n && reachable_[i] == candidate) i++;
+
+        // insert candidate in its final place.
+        new_reachable_[j++] = candidate;
+      }
+    }
+    std::swap(reachable_, new_reachable_);
+  }
+
+  // Returns true iff sum might be expressible as a weighted sum of the added
+  // value. Any sum >= LastValue() is always considered potentially reachable.
+  bool MightBeReachable(int64_t sum) const {
+    if (sum >= reachable_.back()) return true;
+    return std::binary_search(reachable_.begin(), reachable_.end(), sum);
+  }
+
+  const std::array<int64_t, n>& reachable() const { return reachable_; }
+  int64_t LastValue() const { return reachable_.back(); }
+
+ private:
+  std::array<int64_t, n> reachable_;
+  std::array<int64_t, n> new_reachable_;
 };
 
 // Use Dynamic programming to solve a single knapsack. This is used by the
@@ -282,7 +436,7 @@ class IncrementalAverage {
   // Initializes the average with 'initial_average' and number of records to 0.
   explicit IncrementalAverage(double initial_average)
       : average_(initial_average) {}
-  IncrementalAverage() {}
+  IncrementalAverage() = default;
 
   // Sets the number of records to 0 and average to 'reset_value'.
   void Reset(double reset_value);
@@ -380,6 +534,61 @@ std::vector<std::vector<absl::InlinedVector<int64_t, 2>>> FullyCompressTuples(
     absl::Span<const int64_t> domain_sizes,
     std::vector<std::vector<int64_t>>* tuples);
 
+// Keep the top n elements from a stream of elements.
+//
+// TODO(user): We could use gtl::TopN when/if it gets open sourced. Note that
+// we might be slighlty faster here since we use an indirection and don't move
+// the Element class around as much.
+template <typename Element, typename Score>
+class TopN {
+ public:
+  explicit TopN(int n) : n_(n) {}
+
+  void Clear() {
+    heap_.clear();
+    elements_.clear();
+  }
+
+  void Add(Element e, Score score) {
+    if (heap_.size() < n_) {
+      const int index = elements_.size();
+      heap_.push_back({index, score});
+      elements_.push_back(std::move(e));
+      if (heap_.size() == n_) {
+        // TODO(user): We could delay that on the n + 1 push.
+        std::make_heap(heap_.begin(), heap_.end());
+      }
+    } else {
+      if (score <= heap_.front().score) return;
+      const int index_to_replace = heap_.front().index;
+      elements_[index_to_replace] = std::move(e);
+
+      // If needed, we could be faster here with an update operation.
+      std::pop_heap(heap_.begin(), heap_.end());
+      heap_.back() = {index_to_replace, score};
+      std::push_heap(heap_.begin(), heap_.end());
+    }
+  }
+
+  bool empty() const { return elements_.empty(); }
+
+  const std::vector<Element>& UnorderedElements() const { return elements_; }
+
+ private:
+  const int n_;
+
+  // We keep a heap of the n highest score.
+  struct HeapElement {
+    int index;  // in elements_;
+    Score score;
+    bool operator<(const HeapElement& other) const {
+      return score > other.score;
+    }
+  };
+  std::vector<HeapElement> heap_;
+  std::vector<Element> elements_;
+};
+
 // ============================================================================
 // Implementation.
 // ============================================================================
@@ -432,6 +641,108 @@ IntType CeilOfRatio(IntType numerator, IntType denominator) {
 template <typename IntType>
 IntType FloorOfRatio(IntType numerator, IntType denominator) {
   return CeilOrFloorOfRatio<IntType, false>(numerator, denominator);
+}
+
+template <typename K, typename V>
+inline int CompactVectorVector<K, V>::Add(absl::Span<const V> values) {
+  const int index = size();
+  starts_.push_back(buffer_.size());
+  sizes_.push_back(values.size());
+  buffer_.insert(buffer_.end(), values.begin(), values.end());
+  return index;
+}
+
+template <typename K, typename V>
+template <typename L>
+inline int CompactVectorVector<K, V>::AddLiterals(
+    const std::vector<L>& wrapped_values) {
+  const int index = size();
+  starts_.push_back(buffer_.size());
+  sizes_.push_back(wrapped_values.size());
+  for (const L wrapped_value : wrapped_values) {
+    buffer_.push_back(wrapped_value.Index().value());
+  }
+  return index;
+}
+
+// We need to support both StrongType and normal int.
+template <typename K, typename V>
+inline int CompactVectorVector<K, V>::InternalKey(K key) {
+  if constexpr (std::is_same_v<K, int>) {
+    return key;
+  } else {
+    return key.value();
+  }
+}
+
+template <typename K, typename V>
+inline absl::Span<const V> CompactVectorVector<K, V>::operator[](K key) const {
+  DCHECK_GE(key, 0);
+  DCHECK_LT(key, starts_.size());
+  DCHECK_LT(key, sizes_.size());
+  const int k = InternalKey(key);
+  const size_t size = static_cast<size_t>(sizes_[k]);
+  if (size == 0) return {};
+  return {&buffer_[starts_[k]], size};
+}
+
+template <typename K, typename V>
+inline std::vector<absl::Span<const V>>
+CompactVectorVector<K, V>::AsVectorOfSpan() const {
+  std::vector<absl::Span<const V>> result(starts_.size());
+  for (int k = 0; k < starts_.size(); ++k) {
+    result[k] = (*this)[k];
+  }
+  return result;
+}
+
+template <typename K, typename V>
+inline void CompactVectorVector<K, V>::clear() {
+  starts_.clear();
+  sizes_.clear();
+  buffer_.clear();
+}
+
+template <typename K, typename V>
+inline size_t CompactVectorVector<K, V>::size() const {
+  return starts_.size();
+}
+
+template <typename K, typename V>
+template <typename Keys, typename Values>
+inline void CompactVectorVector<K, V>::ResetFromFlatMapping(Keys keys,
+                                                            Values values) {
+  if (keys.empty()) return clear();
+
+  // Compute maximum index.
+  int max_key = 0;
+  for (const K key : keys) {
+    max_key = std::max(max_key, InternalKey(key) + 1);
+  }
+
+  // Compute sizes_;
+  sizes_.assign(max_key, 0);
+  for (const K key : keys) {
+    sizes_[InternalKey(key)]++;
+  }
+
+  // Compute starts_;
+  starts_.assign(max_key, 0);
+  for (int k = 1; k < max_key; ++k) {
+    starts_[k] = starts_[k - 1] + sizes_[k - 1];
+  }
+
+  // Copy data and uses starts as temporary indices.
+  buffer_.resize(keys.size());
+  for (int i = 0; i < keys.size(); ++i) {
+    buffer_[starts_[InternalKey(keys[i])]++] = values[i];
+  }
+
+  // Restore starts_.
+  for (int k = max_key - 1; k > 0; --k) {
+    starts_[k] = starts_[k - 1];
+  }
+  starts_[0] = 0;
 }
 
 }  // namespace sat

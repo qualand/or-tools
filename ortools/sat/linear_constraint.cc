@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <limits>
 #include <string>
 #include <utility>
@@ -24,8 +23,8 @@
 
 #include "absl/base/attributes.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
-#include "ortools/base/logging.h"
 #include "ortools/base/mathutil.h"
 #include "ortools/base/strong_vector.h"
 #include "ortools/sat/integer.h"
@@ -483,6 +482,28 @@ IntegerValue GetCoefficientOfPositiveVar(const IntegerVariable var,
     }
   }
   return IntegerValue(0);
+}
+
+bool PossibleOverflow(const IntegerTrail& integer_trail,
+                      const LinearConstraint& constraint) {
+  IntegerValue min_activity(0);
+  IntegerValue max_activity(0);
+  const int size = constraint.vars.size();
+  for (int i = 0; i < size; ++i) {
+    const IntegerVariable var = constraint.vars[i];
+    const IntegerValue coeff = constraint.coeffs[i];
+    CHECK_NE(coeff, 0);
+    const IntegerValue lb = integer_trail.LevelZeroLowerBound(var);
+    const IntegerValue ub = integer_trail.LevelZeroUpperBound(var);
+    if (coeff > 0) {
+      if (!AddProductTo(lb, coeff, &min_activity)) return true;
+      if (!AddProductTo(ub, coeff, &max_activity)) return true;
+    } else {
+      if (!AddProductTo(ub, coeff, &min_activity)) return true;
+      if (!AddProductTo(lb, coeff, &max_activity)) return true;
+    }
+  }
+  return AtMinOrMaxInt64(CapSub(max_activity.value(), min_activity.value()));
 }
 
 }  // namespace sat

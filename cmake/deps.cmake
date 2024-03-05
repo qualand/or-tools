@@ -43,6 +43,7 @@ set(ABSL_DEPS
   absl::flags_commandlineflag
   absl::flags_marshalling
   absl::flags_parse
+  absl::flags_reflection
   absl::flags_usage
   absl::log
   absl::log_flags
@@ -152,5 +153,9 @@ endif()
 if(BUILD_PYTHON)
   if(NOT BUILD_pybind11)
     find_package(pybind11 REQUIRED)
+  endif()
+
+  if(NOT BUILD_pybind11_protobuf)
+    find_package(pybind11_protobuf REQUIRED)
   endif()
 endif()

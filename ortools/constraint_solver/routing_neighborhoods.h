@@ -16,18 +16,13 @@
 
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "absl/strings/str_cat.h"
-#include "ortools/base/integral_types.h"
-#include "ortools/base/logging.h"
+#include "absl/log/check.h"
 #include "ortools/constraint_solver/constraint_solver.h"
 #include "ortools/constraint_solver/constraint_solveri.h"
-#include "ortools/constraint_solver/routing.h"
-#include "ortools/constraint_solver/routing_search.h"
 #include "ortools/constraint_solver/routing_types.h"
 #include "ortools/util/bitset.h"
 
@@ -60,7 +55,16 @@ class MakeRelocateNeighborsOperator : public PathOperator {
       const std::vector<IntVar*>& vars,
       const std::vector<IntVar*>& secondary_vars,
       std::function<int(int64_t)> start_empty_path_class,
+      std::function<const std::vector<int>&(int, int)> get_neighbors,
       RoutingTransitCallback2 arc_evaluator);
+  MakeRelocateNeighborsOperator(
+      const std::vector<IntVar*>& vars,
+      const std::vector<IntVar*>& secondary_vars,
+      std::function<int(int64_t)> start_empty_path_class,
+      RoutingTransitCallback2 arc_evaluator)
+      : MakeRelocateNeighborsOperator(vars, secondary_vars,
+                                      std::move(start_empty_path_class),
+                                      nullptr, std::move(arc_evaluator)) {}
   ~MakeRelocateNeighborsOperator() override {}
 
   bool MakeNeighbor() override;
@@ -114,21 +118,22 @@ class SwapActiveToShortestPathOperator : public PathOperator {
       std::function<int(int64_t)> start_empty_path_class,
       std::vector<std::vector<int64_t>> alternative_sets,
       RoutingTransitCallback2 arc_evaluator);
-  ~SwapActiveToShortestPathOperator() override = default;
+  ~SwapActiveToShortestPathOperator() override {}
   bool MakeNeighbor() override;
   std::string DebugString() const override {
     return "SwapActiveToShortestPath";
   }
 
  private:
-  void UpdateShortestPath(int source, int sink,
-                          const std::vector<int>& alternative_chain);
+  const std::vector<int64_t>& GetShortestPath(
+      int source, int sink, const std::vector<int>& alternative_chain);
 
   RoutingTransitCallback2 arc_evaluator_;
   const std::vector<std::vector<int64_t>> alternative_sets_;
   std::vector<int> to_alternative_set_;
   std::vector<int64_t> path_predecessor_;
   std::vector<int64_t> path_;
+  SparseBitset<int64_t> touched_;
 };
 
 /// Pair-based neighborhood operators, designed to move nodes by pairs (pairs
@@ -159,14 +164,14 @@ class MakePairActiveOperator : public PathOperator {
   MakePairActiveOperator(const std::vector<IntVar*>& vars,
                          const std::vector<IntVar*>& secondary_vars,
                          std::function<int(int64_t)> start_empty_path_class,
-                         const RoutingIndexPairs& pairs);
+                         const std::vector<PickupDeliveryPair>& pairs);
   ~MakePairActiveOperator() override {}
   bool MakeNeighbor() override;
   std::string DebugString() const override { return "MakePairActive"; }
 
  protected:
   bool MakeOneNeighbor() override;
-  bool OnSamePathAsPreviousBase(int64_t base_index) override {
+  bool OnSamePathAsPreviousBase(int64_t /*base_index*/) override {
     /// Both base nodes have to be on the same path since they represent the
     /// nodes after which unactive node pairs will be moved.
     return true;
@@ -186,7 +191,7 @@ class MakePairActiveOperator : public PathOperator {
   int inactive_pair_;
   int inactive_pair_first_index_;
   int inactive_pair_second_index_;
-  const RoutingIndexPairs pairs_;
+  const std::vector<PickupDeliveryPair> pairs_;
 };
 
 /// Operator which makes pairs of active nodes inactive.
@@ -195,7 +200,7 @@ class MakePairInactiveOperator : public PathOperator {
   MakePairInactiveOperator(const std::vector<IntVar*>& vars,
                            const std::vector<IntVar*>& secondary_vars,
                            std::function<int(int64_t)> start_empty_path_class,
-                           const RoutingIndexPairs& index_pairs);
+                           const std::vector<PickupDeliveryPair>& pairs);
 
   bool MakeNeighbor() override;
   std::string DebugString() const override { return "MakePairInActive"; }
@@ -214,7 +219,7 @@ class PairRelocateOperator : public PathOperator {
   PairRelocateOperator(const std::vector<IntVar*>& vars,
                        const std::vector<IntVar*>& secondary_vars,
                        std::function<int(int64_t)> start_empty_path_class,
-                       const RoutingIndexPairs& index_pairs);
+                       const std::vector<PickupDeliveryPair>& pairs);
   ~PairRelocateOperator() override {}
 
   bool MakeNeighbor() override;
@@ -247,7 +252,16 @@ class GroupPairAndRelocateOperator : public PathOperator {
       const std::vector<IntVar*>& vars,
       const std::vector<IntVar*>& secondary_vars,
       std::function<int(int64_t)> start_empty_path_class,
-      const RoutingIndexPairs& index_pairs);
+      std::function<const std::vector<int>&(int, int)> get_neighbors,
+      const std::vector<PickupDeliveryPair>& pairs);
+  GroupPairAndRelocateOperator(
+      const std::vector<IntVar*>& vars,
+      const std::vector<IntVar*>& secondary_vars,
+      std::function<int(int64_t)> start_empty_path_class,
+      const std::vector<PickupDeliveryPair>& pairs)
+      : GroupPairAndRelocateOperator(vars, secondary_vars,
+                                     std::move(start_empty_path_class), nullptr,
+                                     pairs) {}
   ~GroupPairAndRelocateOperator() override {}
 
   bool MakeNeighbor() override;
@@ -267,10 +281,17 @@ class GroupPairAndRelocateOperator : public PathOperator {
 // pair's first node; there are many redundant neighbors if done blindly.
 class LightPairRelocateOperator : public PathOperator {
  public:
+  LightPairRelocateOperator(
+      const std::vector<IntVar*>& vars,
+      const std::vector<IntVar*>& secondary_vars,
+      std::function<int(int64_t)> start_empty_path_class,
+      std::function<const std::vector<int>&(int, int)> get_neighbors,
+      const std::vector<PickupDeliveryPair>& pairs,
+      std::function<bool(int64_t)> force_lifo = nullptr);
   LightPairRelocateOperator(const std::vector<IntVar*>& vars,
                             const std::vector<IntVar*>& secondary_vars,
                             std::function<int(int64_t)> start_empty_path_class,
-                            const RoutingIndexPairs& index_pairs,
+                            const std::vector<PickupDeliveryPair>& pairs,
                             std::function<bool(int64_t)> force_lifo = nullptr);
   ~LightPairRelocateOperator() override {}
 
@@ -291,10 +312,19 @@ class LightPairRelocateOperator : public PathOperator {
 ///   1 -> [C] ->  [D] -> 2 -> 3, 4 -> [A] -> [B] -> 5
 class PairExchangeOperator : public PathOperator {
  public:
+  PairExchangeOperator(
+      const std::vector<IntVar*>& vars,
+      const std::vector<IntVar*>& secondary_vars,
+      std::function<int(int64_t)> start_empty_path_class,
+      std::function<const std::vector<int>&(int, int)> get_neighbors,
+      const std::vector<PickupDeliveryPair>& pairs);
   PairExchangeOperator(const std::vector<IntVar*>& vars,
                        const std::vector<IntVar*>& secondary_vars,
                        std::function<int(int64_t)> start_empty_path_class,
-                       const RoutingIndexPairs& index_pairs);
+                       const std::vector<PickupDeliveryPair>& pairs)
+      : PairExchangeOperator(vars, secondary_vars,
+                             std::move(start_empty_path_class), nullptr,
+                             pairs) {}
   ~PairExchangeOperator() override {}
 
   bool MakeNeighbor() override;
@@ -302,7 +332,9 @@ class PairExchangeOperator : public PathOperator {
 
  private:
   bool RestartAtPathStartOnSynchronize() override { return true; }
-  bool ConsiderAlternatives(int64_t base_index) const override { return true; }
+  bool ConsiderAlternatives(int64_t /*base_index*/) const override {
+    return true;
+  }
   bool GetPreviousAndSibling(int64_t node, int64_t* previous, int64_t* sibling,
                              int64_t* sibling_previous) const;
 };
@@ -326,7 +358,7 @@ class PairExchangeRelocateOperator : public PathOperator {
       const std::vector<IntVar*>& vars,
       const std::vector<IntVar*>& secondary_vars,
       std::function<int(int64_t)> start_empty_path_class,
-      const RoutingIndexPairs& index_pairs);
+      const std::vector<PickupDeliveryPair>& pairs);
   ~PairExchangeRelocateOperator() override {}
 
   bool MakeNeighbor() override;
@@ -369,8 +401,7 @@ class SwapIndexPairOperator : public IntVarLocalSearchOperator {
  public:
   SwapIndexPairOperator(const std::vector<IntVar*>& vars,
                         const std::vector<IntVar*>& path_vars,
-                        std::function<int(int64_t)> start_empty_path_class,
-                        const RoutingIndexPairs& index_pairs);
+                        const std::vector<PickupDeliveryPair>& pairs);
   ~SwapIndexPairOperator() override {}
 
   bool MakeNextNeighbor(Assignment* delta, Assignment* deltadelta) override;
@@ -391,7 +422,7 @@ class SwapIndexPairOperator : public IntVarLocalSearchOperator {
     }
   }
 
-  const RoutingIndexPairs index_pairs_;
+  const std::vector<PickupDeliveryPair> pairs_;
   int pair_index_;
   int first_index_;
   int second_index_;
@@ -410,7 +441,7 @@ class IndexPairSwapActiveOperator : public PathOperator {
       const std::vector<IntVar*>& vars,
       const std::vector<IntVar*>& secondary_vars,
       std::function<int(int64_t)> start_empty_path_class,
-      const RoutingIndexPairs& index_pairs);
+      const std::vector<PickupDeliveryPair>& pairs);
   ~IndexPairSwapActiveOperator() override {}
 
   bool MakeNextNeighbor(Assignment* delta, Assignment* deltadelta) override;
@@ -423,218 +454,6 @@ class IndexPairSwapActiveOperator : public PathOperator {
   void OnNodeInitialization() override;
 
   int inactive_node_;
-};
-
-/// Class of operators using a RoutingFilteredHeuristic to insert unperformed
-/// nodes after changes have been made to the current solution.
-// TODO(user): Put these methods in an object with helper methods instead
-// of adding a layer to the class hierarchy.
-class FilteredHeuristicLocalSearchOperator : public IntVarLocalSearchOperator {
- public:
-  explicit FilteredHeuristicLocalSearchOperator(
-      std::unique_ptr<RoutingFilteredHeuristic> heuristic,
-      bool keep_inverse_values = false);
-  ~FilteredHeuristicLocalSearchOperator() override {}
-
- protected:
-  virtual bool IncrementPosition() = 0;
-  /// Virtual method to return the next_accessor to be passed to the heuristic
-  /// to build a new solution. This method should also correctly set the
-  /// nodes being removed (if any) in removed_nodes_.
-  virtual std::function<int64_t(int64_t)> SetupNextAccessorForNeighbor() = 0;
-
-  std::string HeuristicName() const {
-    std::string heuristic_name = heuristic_->DebugString();
-    const int erase_pos = heuristic_name.find("FilteredHeuristic");
-    if (erase_pos != std::string::npos) {
-      const int expected_name_size = heuristic_name.size() - 17;
-      heuristic_name.erase(erase_pos);
-      // NOTE: Verify that the "FilteredHeuristic" string was at the end of the
-      // heuristic name.
-      DCHECK_EQ(heuristic_name.size(), expected_name_size);
-    }
-    return heuristic_name;
-  }
-
-  // TODO(user): Remove the dependency from RoutingModel by storing an
-  // IntVarFilteredHeuristic here instead and storing information on path
-  // start/ends like PathOperator does (instead of relying on the model).
-  RoutingModel* const model_;
-  /// Keeps track of removed nodes when making a neighbor.
-  SparseBitset<> removed_nodes_;
-
- private:
-  bool MakeOneNeighbor() override;
-  bool MakeChangesAndInsertNodes();
-
-  int64_t VehicleVarIndex(int64_t node) const { return model_->Size() + node; }
-
-  const std::unique_ptr<RoutingFilteredHeuristic> heuristic_;
-  const bool consider_vehicle_vars_;
-};
-
-/// LNS-like operator based on a filtered first solution heuristic to rebuild
-/// the solution, after the destruction phase consisting of removing one route.
-class FilteredHeuristicPathLNSOperator
-    : public FilteredHeuristicLocalSearchOperator {
- public:
-  explicit FilteredHeuristicPathLNSOperator(
-      std::unique_ptr<RoutingFilteredHeuristic> heuristic);
-  ~FilteredHeuristicPathLNSOperator() override {}
-
-  std::string DebugString() const override {
-    return absl::StrCat("HeuristicPathLNS(", HeuristicName(), ")");
-  }
-
- private:
-  void OnStart() override;
-
-  bool IncrementPosition() override;
-  bool CurrentRouteIsEmpty() const;
-  void IncrementCurrentRouteToNextNonEmpty();
-
-  std::function<int64_t(int64_t)> SetupNextAccessorForNeighbor() override;
-
-  int current_route_;
-  int last_route_;
-  bool just_started_;
-};
-
-/// Heuristic-based local search operator which relocates an entire route to
-/// an empty vehicle of different vehicle class and then tries to insert
-/// unperformed nodes using the heuristic.
-class RelocatePathAndHeuristicInsertUnperformedOperator
-    : public FilteredHeuristicLocalSearchOperator {
- public:
-  explicit RelocatePathAndHeuristicInsertUnperformedOperator(
-      std::unique_ptr<RoutingFilteredHeuristic> heuristic);
-  ~RelocatePathAndHeuristicInsertUnperformedOperator() override {}
-
-  std::string DebugString() const override {
-    return absl::StrCat("RelocatePathAndHeuristicInsertUnperformed(",
-                        HeuristicName(), ")");
-  }
-
- private:
-  void OnStart() override;
-
-  bool IncrementPosition() override;
-  bool IncrementRoutes();
-
-  std::function<int64_t(int64_t)> SetupNextAccessorForNeighbor() override;
-
-  int route_to_relocate_index_;
-  int last_route_to_relocate_index_;
-  int empty_route_index_;
-  int last_empty_route_index_;
-  std::vector<int> routes_to_relocate_;
-  std::vector<int> empty_routes_;
-  std::vector<int64_t> last_node_on_route_;
-  bool has_unperformed_nodes_;
-  bool just_started_;
-};
-
-/// Similar to the heuristic path LNS above, but instead of removing one route
-/// entirely, the destruction phase consists of removing all nodes on an
-/// "expensive" chain from a route.
-class FilteredHeuristicExpensiveChainLNSOperator
-    : public FilteredHeuristicLocalSearchOperator {
- public:
-  FilteredHeuristicExpensiveChainLNSOperator(
-      std::unique_ptr<RoutingFilteredHeuristic> heuristic,
-      int num_arcs_to_consider,
-      std::function<int64_t(int64_t, int64_t, int64_t)>
-          arc_cost_for_route_start);
-  ~FilteredHeuristicExpensiveChainLNSOperator() override {}
-
-  std::string DebugString() const override {
-    return absl::StrCat("HeuristicExpensiveChainLNS(", HeuristicName(), ")");
-  }
-
- private:
-  void OnStart() override;
-
-  bool IncrementPosition() override;
-  bool IncrementRoute();
-  bool IncrementCurrentArcIndices();
-  bool FindMostExpensiveChainsOnRemainingRoutes();
-
-  std::function<int64_t(int64_t)> SetupNextAccessorForNeighbor() override;
-
-  int current_route_;
-  int last_route_;
-
-  const int num_arcs_to_consider_;
-  std::vector<std::pair<int64_t, int>> most_expensive_arc_starts_and_ranks_;
-  /// Indices in most_expensive_arc_starts_and_ranks_ corresponding to the first
-  /// and second arcs currently being considered for removal.
-  std::pair</*first_arc_index*/ int, /*second_arc_index*/ int>
-      current_expensive_arc_indices_;
-  std::function<int64_t(/*before_node*/ int64_t, /*after_node*/ int64_t,
-                        /*path_start*/ int64_t)>
-      arc_cost_for_route_start_;
-
-  bool just_started_;
-};
-
-/// Filtered heuristic LNS operator, where the destruction phase consists of
-/// removing a node and the 'num_close_nodes' nodes closest to it, along with
-/// each of their corresponding sibling pickup/deliveries that are performed.
-class FilteredHeuristicCloseNodesLNSOperator
-    : public FilteredHeuristicLocalSearchOperator {
- public:
-  FilteredHeuristicCloseNodesLNSOperator(
-      std::unique_ptr<RoutingFilteredHeuristic> heuristic, int num_close_nodes);
-  ~FilteredHeuristicCloseNodesLNSOperator() override {}
-
-  std::string DebugString() const override {
-    return absl::StrCat("HeuristicCloseNodesLNS(", HeuristicName(), ")");
-  }
-
- private:
-  void Initialize();
-
-  void OnStart() override;
-
-  bool IncrementPosition() override;
-
-  std::function<int64_t(int64_t)> SetupNextAccessorForNeighbor() override;
-
-  void RemoveNode(int64_t node);
-  void RemoveNodeAndActiveSibling(int64_t node);
-
-  bool IsActive(int64_t node) const {
-    DCHECK_LT(node, model_->Size());
-    return Value(node) != node && !removed_nodes_[node];
-  }
-
-  int64_t Prev(int64_t node) const {
-    DCHECK_EQ(Value(InverseValue(node)), node);
-    DCHECK_LT(node, new_prevs_.size());
-    return changed_prevs_[node] ? new_prevs_[node] : InverseValue(node);
-  }
-  int64_t Next(int64_t node) const {
-    DCHECK(!model_->IsEnd(node));
-    return changed_nexts_[node] ? new_nexts_[node] : Value(node);
-  }
-
-  std::vector<int64_t> GetActiveSiblings(int64_t node) const;
-
-  const std::vector<std::pair<std::vector<int64_t>, std::vector<int64_t>>>&
-      pickup_delivery_pairs_;
-
-  int current_node_;
-  int last_node_;
-  bool just_started_;
-  bool initialized_;
-
-  std::vector<std::vector<int64_t>> close_nodes_;
-  const int num_close_nodes_;
-  /// Keep track of changes when making a neighbor.
-  std::vector<int64_t> new_nexts_;
-  SparseBitset<> changed_nexts_;
-  std::vector<int64_t> new_prevs_;
-  SparseBitset<> changed_prevs_;
 };
 
 /// RelocateExpensiveChain
@@ -696,7 +515,7 @@ class PairNodeSwapActiveOperator : public PathOperator {
   PairNodeSwapActiveOperator(const std::vector<IntVar*>& vars,
                              const std::vector<IntVar*>& secondary_vars,
                              std::function<int(int64_t)> start_empty_path_class,
-                             const RoutingIndexPairs& index_pairs);
+                             const std::vector<PickupDeliveryPair>& pairs);
   ~PairNodeSwapActiveOperator() override {}
 
   bool MakeNextNeighbor(Assignment* delta, Assignment* deltadelta) override;
@@ -706,7 +525,7 @@ class PairNodeSwapActiveOperator : public PathOperator {
   }
 
  protected:
-  bool OnSamePathAsPreviousBase(int64_t base_index) override {
+  bool OnSamePathAsPreviousBase(int64_t /*base_index*/) override {
     /// Both base nodes have to be on the same path since they represent the
     /// nodes after which unactive node pairs will be moved.
     return true;
@@ -722,7 +541,7 @@ class PairNodeSwapActiveOperator : public PathOperator {
   void OnNodeInitialization() override;
 
   int inactive_pair_;
-  RoutingIndexPairs pairs_;
+  std::vector<PickupDeliveryPair> pairs_;
 };
 
 // ==========================================================================
@@ -733,11 +552,11 @@ PairNodeSwapActiveOperator<swap_first>::PairNodeSwapActiveOperator(
     const std::vector<IntVar*>& vars,
     const std::vector<IntVar*>& secondary_vars,
     std::function<int(int64_t)> start_empty_path_class,
-    const RoutingIndexPairs& index_pairs)
+    const std::vector<PickupDeliveryPair>& pairs)
     : PathOperator(vars, secondary_vars, 2, false, false,
-                   std::move(start_empty_path_class)),
+                   std::move(start_empty_path_class), nullptr),
       inactive_pair_(0),
-      pairs_(index_pairs) {}
+      pairs_(pairs) {}
 
 template <bool swap_first>
 int64_t PairNodeSwapActiveOperator<swap_first>::GetBaseNodeRestartPosition(
@@ -753,7 +572,8 @@ int64_t PairNodeSwapActiveOperator<swap_first>::GetBaseNodeRestartPosition(
 template <bool swap_first>
 void PairNodeSwapActiveOperator<swap_first>::OnNodeInitialization() {
   for (int i = 0; i < pairs_.size(); ++i) {
-    if (IsInactive(pairs_[i].first[0]) && IsInactive(pairs_[i].second[0])) {
+    if (IsInactive(pairs_[i].pickup_alternatives[0]) &&
+        IsInactive(pairs_[i].delivery_alternatives[0])) {
       inactive_pair_ = i;
       return;
     }
@@ -765,8 +585,8 @@ template <bool swap_first>
 bool PairNodeSwapActiveOperator<swap_first>::MakeNextNeighbor(
     Assignment* delta, Assignment* deltadelta) {
   while (inactive_pair_ < pairs_.size()) {
-    if (!IsInactive(pairs_[inactive_pair_].first[0]) ||
-        !IsInactive(pairs_[inactive_pair_].second[0]) ||
+    if (!IsInactive(pairs_[inactive_pair_].pickup_alternatives[0]) ||
+        !IsInactive(pairs_[inactive_pair_].delivery_alternatives[0]) ||
         !PathOperator::MakeNextNeighbor(delta, deltadelta)) {
       ResetPosition();
       ++inactive_pair_;
@@ -783,8 +603,8 @@ bool PairNodeSwapActiveOperator<swap_first>::MakeNeighbor() {
   if (IsPathEnd(base)) {
     return false;
   }
-  const int64_t pair_first = pairs_[inactive_pair_].first[0];
-  const int64_t pair_second = pairs_[inactive_pair_].second[0];
+  const int64_t pair_first = pairs_[inactive_pair_].pickup_alternatives[0];
+  const int64_t pair_second = pairs_[inactive_pair_].delivery_alternatives[0];
   if (swap_first) {
     return MakeActive(pair_second, BaseNode(1)) &&
            MakeActive(pair_first, base) &&
@@ -795,6 +615,30 @@ bool PairNodeSwapActiveOperator<swap_first>::MakeNeighbor() {
            MakeChainInactive(pair_second, Next(pair_second));
   }
 }
+
+/// A utility class to maintain pickup and delivery information of nodes.
+class PickupAndDeliveryData {
+ public:
+  PickupAndDeliveryData(int num_nodes,
+                        const std::vector<PickupDeliveryPair>& pairs);
+  bool IsPickupNode(int64_t node) const {
+    DCHECK_LT(node, is_pickup_node_.size());
+    return is_pickup_node_[node];
+  }
+  bool IsDeliveryNode(int64_t node) const {
+    DCHECK_LT(node, is_delivery_node_.size());
+    return is_delivery_node_[node];
+  }
+  int GetPairOfNode(int64_t node) const {
+    DCHECK_LT(node, pair_of_node_.size());
+    return pair_of_node_[node];
+  }
+
+ private:
+  std::vector<bool> is_pickup_node_;
+  std::vector<bool> is_delivery_node_;
+  std::vector<int> pair_of_node_;
+};
 
 /// Tries to move subtrips after an insertion node.
 /// A subtrip is a subsequence that contains only matched pickup and delivery
@@ -809,10 +653,18 @@ bool PairNodeSwapActiveOperator<swap_first>::MakeNeighbor() {
 /// rejected nodes are only pickups.
 class RelocateSubtrip : public PathOperator {
  public:
+  RelocateSubtrip(
+      const std::vector<IntVar*>& vars,
+      const std::vector<IntVar*>& secondary_vars,
+      std::function<int(int64_t)> start_empty_path_class,
+      std::function<const std::vector<int>&(int, int)> get_neighbors,
+      const std::vector<PickupDeliveryPair>& pairs);
   RelocateSubtrip(const std::vector<IntVar*>& vars,
                   const std::vector<IntVar*>& secondary_vars,
                   std::function<int(int64_t)> start_empty_path_class,
-                  const RoutingIndexPairs& pairs);
+                  const std::vector<PickupDeliveryPair>& pairs)
+      : RelocateSubtrip(vars, secondary_vars, std::move(start_empty_path_class),
+                        nullptr, pairs) {}
 
   std::string DebugString() const override { return "RelocateSubtrip"; }
   bool MakeNeighbor() override;
@@ -824,13 +676,13 @@ class RelocateSubtrip : public PathOperator {
   /// Relocates the subtrip ending at chain_first_node. It must be a delivery.
   bool RelocateSubTripFromDelivery(int64_t chain_last_node,
                                    int64_t insertion_node);
-  std::vector<bool> is_pickup_node_;
-  std::vector<bool> is_delivery_node_;
-  std::vector<int> pair_of_node_;
+  void SetPath(const std::vector<int64_t>& path, int path_id);
+
+  const PickupAndDeliveryData pd_data_;
   // Represents the set of pairs that have been opened during a call to
   // MakeNeighbor(). This vector must be all false before and after calling
   // RelocateSubTripFromPickup() and RelocateSubTripFromDelivery().
-  std::vector<bool> opened_pairs_bitset_;
+  std::vector<bool> opened_pairs_set_;
 
   std::vector<int64_t> rejected_nodes_;
   std::vector<int64_t> subtrip_nodes_;
@@ -838,10 +690,18 @@ class RelocateSubtrip : public PathOperator {
 
 class ExchangeSubtrip : public PathOperator {
  public:
+  ExchangeSubtrip(
+      const std::vector<IntVar*>& vars,
+      const std::vector<IntVar*>& secondary_vars,
+      std::function<int(int64_t)> start_empty_path_class,
+      std::function<const std::vector<int>&(int, int)> get_neighbors,
+      const std::vector<PickupDeliveryPair>& pairs);
   ExchangeSubtrip(const std::vector<IntVar*>& vars,
                   const std::vector<IntVar*>& secondary_vars,
                   std::function<int(int64_t)> start_empty_path_class,
-                  const RoutingIndexPairs& pairs);
+                  const std::vector<PickupDeliveryPair>& pairs)
+      : ExchangeSubtrip(vars, secondary_vars, std::move(start_empty_path_class),
+                        nullptr, pairs) {}
 
   std::string DebugString() const override { return "ExchangeSubtrip"; }
   bool MakeNeighbor() override;
@@ -875,10 +735,7 @@ class ExchangeSubtrip : public PathOperator {
                                  std::vector<int64_t>* subtrip);
   void SetPath(const std::vector<int64_t>& path, int path_id);
 
-  // Precompute some information about nodes.
-  std::vector<bool> is_pickup_node_;
-  std::vector<bool> is_delivery_node_;
-  std::vector<int> pair_of_node_;
+  const PickupAndDeliveryData pd_data_;
   // Represents the set of opened pairs during ExtractChainsFromXXX().
   std::vector<bool> opened_pairs_set_;
   // Keep internal structures under hand to avoid reallocation.

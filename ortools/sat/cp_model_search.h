@@ -16,9 +16,11 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
-#include "ortools/base/integral_types.h"
+#include "absl/container/flat_hash_map.h"
+#include "ortools/base/types.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/cp_model_mapping.h"
 #include "ortools/sat/integer.h"
@@ -76,13 +78,27 @@ class CpModelView {
 std::function<BooleanOrIntegerLiteral()> ConstructUserSearchStrategy(
     const CpModelProto& cp_model_proto, Model* model);
 
+// Constructs a search strategy tailored for the current model.
+std::function<BooleanOrIntegerLiteral()> ConstructHeuristicSearchStrategy(
+    const CpModelProto& cp_model_proto, Model* model);
+
+// Constructs an integer completion search strategy.
+std::function<BooleanOrIntegerLiteral()>
+ConstructIntegerCompletionSearchStrategy(
+    const std::vector<IntegerVariable>& variable_mapping,
+    IntegerVariable objective_var, Model* model);
+
+// Constructs a search strategy that follows the hints from the model.
+std::function<BooleanOrIntegerLiteral()> ConstructHintSearchStrategy(
+    const CpModelProto& cp_model_proto, CpModelMapping* mapping, Model* model);
+
 // Constructs our "fixed" search strategy which start with
 // ConstructUserSearchStrategy() but is completed by a couple of automatic
 // heuristics.
 std::function<BooleanOrIntegerLiteral()> ConstructFixedSearchStrategy(
-    const CpModelProto& cp_model_proto,
-    const std::vector<IntegerVariable>& variable_mapping,
-    IntegerVariable objective_var, Model* model);
+    std::function<BooleanOrIntegerLiteral()> user_search,
+    std::function<BooleanOrIntegerLiteral()> heuristic_search,
+    std::function<BooleanOrIntegerLiteral()> integer_completion);
 
 // For debugging fixed-search: display information about the named variables
 // domain before taking each decision. Note that we copy the instrumented
@@ -93,6 +109,14 @@ std::function<BooleanOrIntegerLiteral()> InstrumentSearchStrategy(
     const std::vector<IntegerVariable>& variable_mapping,
     const std::function<BooleanOrIntegerLiteral()>& instrumented_strategy,
     Model* model);
+
+// Returns all the named set of parameters known to the solver. This include our
+// default strategies like "max_lp", "core", etc... It is visible here so that
+// this can be reused by parameter validation.
+//
+// Usually, named strategies just override a few field from the base_params.
+absl::flat_hash_map<std::string, SatParameters> GetNamedParameters(
+    const SatParameters& base_params);
 
 // Returns up to base_params.num_workers() different parameters.
 // We do not always return num_worker parameters to leave room for strategies
@@ -105,6 +129,16 @@ std::vector<SatParameters> GetDiverseSetOfParameters(
 std::vector<SatParameters> GetFirstSolutionParams(
     const SatParameters& base_params, const CpModelProto& cp_model,
     int num_params_to_generate);
+
+// Returns a vector of num_params_to_generate set of parameters to specify
+// solvers that cooperatively explore a search tree.
+std::vector<SatParameters> GetWorkSharingParams(
+    const SatParameters& base_params, const CpModelProto& cp_model,
+    int num_params_to_generate);
+
+// This generates a valid random seed (base_seed + delta) without overflow.
+// We assume |delta| is small.
+int ValidSumSeed(int base_seed, int delta);
 
 }  // namespace sat
 }  // namespace operations_research

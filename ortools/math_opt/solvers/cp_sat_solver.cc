@@ -13,18 +13,17 @@
 
 #include "ortools/math_opt/solvers/cp_sat_solver.h"
 
-#include <algorithm>
 #include <atomic>
-#include <cmath>
 #include <cstdint>
 #include <functional>
-#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -32,10 +31,10 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-#include "absl/log/check.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/protoutil.h"
 #include "ortools/base/status_macros.h"
@@ -47,6 +46,7 @@
 #include "ortools/math_opt/core/solve_interrupter.h"
 #include "ortools/math_opt/core/solver_interface.h"
 #include "ortools/math_opt/core/sparse_vector_view.h"
+#include "ortools/math_opt/infeasible_subsystem.pb.h"
 #include "ortools/math_opt/io/proto_converter.h"
 #include "ortools/math_opt/model.pb.h"
 #include "ortools/math_opt/model_parameters.pb.h"
@@ -63,8 +63,6 @@ namespace operations_research {
 namespace math_opt {
 
 namespace {
-
-constexpr double kInf = std::numeric_limits<double>::infinity();
 
 constexpr SupportedProblemStructures kCpSatSupportedStructures = {
     .integer_variables = SupportType::kSupported,
@@ -112,6 +110,10 @@ std::vector<std::string> SetSolveParameters(
   if (parameters.has_time_limit()) {
     request.set_solver_time_limit_seconds(absl::ToDoubleSeconds(
         util_time::DecodeGoogleApiProto(parameters.time_limit()).value()));
+  }
+  if (parameters.has_iteration_limit()) {
+    warnings.push_back(
+        "The iteration_limit parameter is not supported for CP-SAT.");
   }
   if (parameters.has_node_limit()) {
     warnings.push_back("The node_limit parameter is not supported for CP-SAT.");
@@ -167,7 +169,7 @@ std::vector<std::string> SetSolveParameters(
   }
   if (parameters.lp_algorithm() != LP_ALGORITHM_UNSPECIFIED) {
     warnings.push_back(
-        absl::StrCat("Setting the LP Algorithm (was set to ",
+        absl::StrCat("Setting lp_algorithm (was set to ",
                      ProtoEnumToString(parameters.lp_algorithm()),
                      ") is not supported for CP_SAT solver"));
   }
@@ -244,42 +246,23 @@ std::vector<std::string> SetSolveParameters(
   return warnings;
 }
 
-absl::StatusOr<std::pair<SolveStatsProto, TerminationProto>>
-GetTerminationAndStats(const bool is_interrupted, const bool maximize,
-                       const bool used_cutoff,
-                       const MPSolutionResponse& response) {
-  SolveStatsProto solve_stats;
-  TerminationProto termination;
-
-  // Set default status and bounds.
-  solve_stats.mutable_problem_status()->set_primal_status(
-      FEASIBILITY_STATUS_UNDETERMINED);
-  solve_stats.set_best_primal_bound(maximize ? -kInf : kInf);
-  solve_stats.mutable_problem_status()->set_dual_status(
-      FEASIBILITY_STATUS_UNDETERMINED);
-  solve_stats.set_best_dual_bound(maximize ? kInf : -kInf);
-
-  // Set terminations and update status and bounds as appropriate.
+absl::StatusOr<TerminationProto> GetTermination(
+    const bool is_interrupted, const bool maximize, const bool used_cutoff,
+    const MPSolutionResponse& response) {
   switch (response.status()) {
     case MPSOLVER_OPTIMAL:
-      termination =
-          TerminateForReason(TERMINATION_REASON_OPTIMAL, response.status_str());
-      solve_stats.mutable_problem_status()->set_primal_status(
-          FEASIBILITY_STATUS_FEASIBLE);
-      solve_stats.set_best_primal_bound(response.objective_value());
-      solve_stats.mutable_problem_status()->set_dual_status(
-          FEASIBILITY_STATUS_FEASIBLE);
-      solve_stats.set_best_dual_bound(response.best_objective_bound());
+      return OptimalTerminationProto(response.objective_value(),
+                                     response.best_objective_bound(),
+                                     response.status_str());
       break;
     case MPSOLVER_INFEASIBLE:
       if (used_cutoff) {
-        termination =
-            NoSolutionFoundTermination(LIMIT_CUTOFF, response.status_str());
+        return CutoffTerminationProto(maximize, response.status_str());
       } else {
-        termination = TerminateForReason(TERMINATION_REASON_INFEASIBLE,
-                                         response.status_str());
-        solve_stats.mutable_problem_status()->set_primal_status(
-            FEASIBILITY_STATUS_INFEASIBLE);
+        // By convention infeasible MIPs are always dual feasible.
+        return InfeasibleTerminationProto(
+            maximize, /*dual_feasibility_status=*/FEASIBILITY_STATUS_FEASIBLE,
+            response.status_str());
       }
       break;
     case MPSOLVER_UNKNOWN_STATUS:
@@ -297,32 +280,25 @@ GetTerminationAndStats(const bool is_interrupted, const bool maximize,
       // TODO(b/202159173): A better solution would be to use CP-SAT API
       // directly which may help further improve the statuses.
       if (absl::StrContains(response.status_str(), "infeasible or unbounded")) {
-        termination = TerminateForReason(
-            TERMINATION_REASON_INFEASIBLE_OR_UNBOUNDED, response.status_str());
-        solve_stats.mutable_problem_status()->set_primal_or_dual_infeasible(
-            true);
+        return InfeasibleOrUnboundedTerminationProto(
+            maximize,
+            /*dual_feasibility_status=*/FEASIBILITY_STATUS_UNDETERMINED,
+            response.status_str());
       } else {
-        termination = TerminateForReason(TERMINATION_REASON_OTHER_ERROR,
-                                         response.status_str());
+        return TerminateForReason(maximize, TERMINATION_REASON_OTHER_ERROR,
+                                  response.status_str());
       }
       break;
     case MPSOLVER_FEASIBLE:
-      termination = FeasibleTermination(
-          is_interrupted ? LIMIT_INTERRUPTED : LIMIT_UNDETERMINED,
+      return FeasibleTerminationProto(
+          maximize, is_interrupted ? LIMIT_INTERRUPTED : LIMIT_UNDETERMINED,
+          response.objective_value(), response.best_objective_bound(),
           response.status_str());
-      solve_stats.mutable_problem_status()->set_primal_status(
-          FEASIBILITY_STATUS_FEASIBLE);
-      solve_stats.set_best_primal_bound(response.objective_value());
-      solve_stats.set_best_dual_bound(response.best_objective_bound());
-      if (std::isfinite(response.best_objective_bound())) {
-        solve_stats.mutable_problem_status()->set_dual_status(
-            FEASIBILITY_STATUS_FEASIBLE);
-      }
       break;
     case MPSOLVER_NOT_SOLVED:
-      termination = NoSolutionFoundTermination(
-          is_interrupted ? LIMIT_INTERRUPTED : LIMIT_UNDETERMINED,
-          response.status_str());
+      return NoSolutionFoundTerminationProto(
+          maximize, is_interrupted ? LIMIT_INTERRUPTED : LIMIT_UNDETERMINED,
+          /*optional_dual_objective=*/std::nullopt, response.status_str());
       break;
     case MPSOLVER_MODEL_INVALID:
       return absl::InternalError(
@@ -332,13 +308,14 @@ GetTerminationAndStats(const bool is_interrupted, const bool maximize,
       return absl::InternalError(
           absl::StrCat("unexpected solve status: ", response.status()));
   }
-  return std::make_pair(std::move(solve_stats), std::move(termination));
+  return absl::InternalError(
+      absl::StrCat("unimplemented solve status: ", response.status()));
 }
 
 }  // namespace
 
 absl::StatusOr<std::unique_ptr<SolverInterface>> CpSatSolver::New(
-    const ModelProto& model, const InitArgs& init_args) {
+    const ModelProto& model, const InitArgs&) {
   RETURN_IF_ERROR(ModelIsSupported(model, kCpSatSupportedStructures, "CP-SAT"));
   ASSIGN_OR_RETURN(MPModelProto cp_sat_model,
                    MathOptModelToMPModelProto(model));
@@ -421,7 +398,7 @@ absl::StatusOr<SolveResultProto> CpSatSolver::Solve(
 
   std::function<void(const std::string&)> logging_callback;
   if (message_cb != nullptr) {
-    logging_callback = [&](const std::string& message) {
+    logging_callback = [&](absl::string_view message) {
       message_cb(absl::StrSplit(message, '\n'));
     };
   }
@@ -464,13 +441,10 @@ absl::StatusOr<SolveResultProto> CpSatSolver::Solve(
                    SatSolveProto(std::move(req), &interrupt_solve,
                                  logging_callback, solution_callback));
   RETURN_IF_ERROR(callback_error) << "error in callback";
-  ASSIGN_OR_RETURN(
-      (auto [solve_stats, termination]),
-      GetTerminationAndStats(local_interrupter.IsInterrupted(),
-                             /*maximize=*/cp_sat_model_.maximize(),
-                             /*used_cutoff=*/used_cutoff, response));
-  *result.mutable_solve_stats() = std::move(solve_stats);
-  *result.mutable_termination() = std::move(termination);
+  ASSIGN_OR_RETURN(*result.mutable_termination(),
+                   GetTermination(local_interrupter.IsInterrupted(),
+                                  /*maximize=*/cp_sat_model_.maximize(),
+                                  /*used_cutoff=*/used_cutoff, response));
   const SparseVectorFilterProto& var_values_filter =
       model_parameters.variable_values_filter();
   auto add_solution =
@@ -499,7 +473,7 @@ absl::StatusOr<SolveResultProto> CpSatSolver::Solve(
   return result;
 }
 
-absl::StatusOr<bool> CpSatSolver::Update(const ModelUpdateProto& model_update) {
+absl::StatusOr<bool> CpSatSolver::Update(const ModelUpdateProto&) {
   return false;
 }
 
@@ -546,6 +520,14 @@ InvertedBounds CpSatSolver::ListInvertedBounds() const {
   }
 
   return inverted_bounds;
+}
+
+absl::StatusOr<ComputeInfeasibleSubsystemResultProto>
+CpSatSolver::ComputeInfeasibleSubsystem(const SolveParametersProto&,
+                                        MessageCallback,
+                                        SolveInterrupter* const) {
+  return absl::UnimplementedError(
+      "CPSAT does not provide a method to compute an infeasible subsystem");
 }
 
 MATH_OPT_REGISTER_SOLVER(SOLVER_TYPE_CP_SAT, CpSatSolver::New);

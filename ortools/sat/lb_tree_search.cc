@@ -21,7 +21,7 @@
 #include <utility>
 #include <vector>
 
-#include "absl/random/distributions.h"
+#include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
@@ -82,8 +82,6 @@ LbTreeSearch::LbTreeSearch(Model* model)
   search_heuristic_ =
       SequentialSearch({SatSolverHeuristic(model),
                         model->GetOrCreate<SearchHeuristics>()->fixed_search});
-
-  last_logging_time_ = absl::Now();
 }
 
 void LbTreeSearch::UpdateParentObjective(int level) {
@@ -198,9 +196,9 @@ void LbTreeSearch::MarkSubtreeAsDeleted(NodeIndex root) {
 
 std::string LbTreeSearch::SmallProgressString() const {
   return absl::StrCat(
-      "#nodes:", num_nodes_in_tree_, "/", nodes_.size(),
-      " #rc:", num_rc_detected_, " #decisions:", num_decisions_taken_,
-      " #@root:", num_back_to_root_node_, " #restarts:", num_full_restarts_);
+      "nodes=", num_nodes_in_tree_, "/", nodes_.size(),
+      " rc=", num_rc_detected_, " decisions=", num_decisions_taken_,
+      " @root=", num_back_to_root_node_, " restarts=", num_full_restarts_);
 }
 
 SatSolver::Status LbTreeSearch::Search(
@@ -298,8 +296,8 @@ SatSolver::Status LbTreeSearch::Search(
       const IntegerValue bound = nodes_[current_branch_[0]].MinObjective();
       if (bound > current_objective_lb_) {
         shared_response_->UpdateInnerObjectiveBounds(
-            absl::StrCat("lb_tree_search ", SmallProgressString()), bound,
-            integer_trail_->LevelZeroUpperBound(objective_var_));
+            absl::StrCat("lb_tree_search (", SmallProgressString(), ") "),
+            bound, integer_trail_->LevelZeroUpperBound(objective_var_));
         current_objective_lb_ = bound;
         if (VLOG_IS_ON(3)) DebugDisplayTree(current_branch_[0]);
       }
@@ -331,7 +329,8 @@ SatSolver::Status LbTreeSearch::Search(
     if (num_decisions_taken_ >= num_decisions_taken_at_last_restart_ +
                                     kNumDecisionsBeforeInitialRestarts &&
         num_full_restarts_ < kMaxNumInitialRestarts) {
-      VLOG(2) << "lb_tree_search initial_restart " << SmallProgressString();
+      VLOG(2) << "lb_tree_search (initial_restart " << SmallProgressString()
+              << ")";
       if (!FullRestart()) return sat_solver_->UnsatStatus();
     }
 
@@ -455,6 +454,7 @@ SatSolver::Status LbTreeSearch::Search(
       } else {
         // See if we have better bounds using the current LP state.
         ExploitReducedCosts(current_branch_[level]);
+        if (node.MinObjective() > current_objective_lb_) break;
 
         // If both lower bound are the same, we pick the literal branch. We do
         // that because this is the polarity that was chosen by the SAT
@@ -491,9 +491,10 @@ SatSolver::Status LbTreeSearch::Search(
         if (lb > current_objective_lb_) break;
       }
 
-      shared_response_->LogPeriodicMessage(
-          "TreeS", SmallProgressString(),
-          parameters_.log_frequency_in_seconds(), &last_logging_time_);
+      if (VLOG_IS_ON(1)) {
+        shared_response_->LogMessageWithThrottling(
+            "TreeS", absl::StrCat(" (", SmallProgressString(), ")"));
+      }
 
       if (n < nodes_.size()) {
         current_branch_.push_back(n);
@@ -537,8 +538,11 @@ SatSolver::Status LbTreeSearch::Search(
     while (true) {
       // TODO(user): We sometimes branch on the objective variable, this should
       // probably be avoided.
-      const LiteralIndex decision =
-          search_helper_->GetDecision(search_heuristic_);
+      if (sat_solver_->ModelIsUnsat()) return sat_solver_->UnsatStatus();
+      LiteralIndex decision;
+      if (!search_helper_->GetDecision(search_heuristic_, &decision)) {
+        continue;
+      }
 
       // No new decision: search done.
       if (time_limit_->LimitReached()) return SatSolver::LIMIT_REACHED;
@@ -698,7 +702,7 @@ void LbTreeSearch::ExploitReducedCosts(NodeIndex n) {
   // gain.
   const auto& cts = lp_constraint_->OptimalConstraints();
   if (cts.empty()) return;
-  const std::unique_ptr<IntegerSumLE>& rc = cts.back();
+  const std::unique_ptr<IntegerSumLE128>& rc = cts.back();
 
   // Note that this return literal EQUIVALENT to the node.literal, not just
   // implied by it. We need that for correctness.

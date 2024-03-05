@@ -17,13 +17,13 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "ortools/base/iterator_adaptors.h"
-#include "ortools/base/logging.h"
-#include "ortools/sat/implied_bounds.h"
 #include "ortools/sat/integer.h"
 #include "ortools/sat/intervals.h"
 #include "ortools/sat/model.h"
 #include "ortools/sat/theta_tree.h"
+#include "ortools/sat/util.h"
 #include "ortools/util/strong_integers.h"
 
 namespace operations_research {
@@ -87,10 +87,9 @@ bool CumulativeEnergyConstraint::Propagate() {
   bool tree_has_mandatory_intervals = false;
 
   // Main loop: insert tasks by increasing end_max, check for overloads.
-  for (const auto task_time :
-       ::gtl::reversed_view(helper_->TaskByDecreasingEndMax())) {
-    const int current_task = task_time.task_index;
-    const IntegerValue current_end = task_time.time;
+  const auto by_decreasing_end_max = helper_->TaskByDecreasingEndMax();
+  for (const auto [current_task, current_end] :
+       ::gtl::reversed_view(by_decreasing_end_max)) {
     if (task_to_start_event_[current_task] == -1) continue;
 
     // Add the current task to the tree.

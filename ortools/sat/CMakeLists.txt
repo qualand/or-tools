@@ -36,23 +36,26 @@ target_link_libraries(${NAME} PRIVATE
   absl::str_format
   protobuf::libprotobuf
   $<$<BOOL:${USE_COINOR}>:Coin::Cbc>
-  ${PROJECT_NAME}::proto)
-#add_library(${PROJECT_NAME}::sat ALIAS ${NAME})
+  ${PROJECT_NAMESPACE}::${PROJECT_NAME}_proto)
+#add_library(${PROJECT_NAMESPACE}::sat ALIAS ${NAME})
 
 # Sat Runner
-include(GNUInstallDirs)
-if(APPLE)
-  set(CMAKE_INSTALL_RPATH
-    "@loader_path/../${CMAKE_INSTALL_LIBDIR};@loader_path")
-elseif(UNIX)
-  set(CMAKE_INSTALL_RPATH
-    "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}:$ORIGIN/../lib64:$ORIGIN/../lib:$ORIGIN")
-endif()
-
 add_executable(sat_runner)
 target_sources(sat_runner PRIVATE "sat_runner.cc")
 target_include_directories(sat_runner PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(sat_runner PRIVATE cxx_std_17)
 target_link_libraries(sat_runner PRIVATE ${PROJECT_NAMESPACE}::ortools)
+
+include(GNUInstallDirs)
+if(APPLE)
+  set_target_properties(sat_runner PROPERTIES INSTALL_RPATH
+    "@loader_path/../${CMAKE_INSTALL_LIBDIR};@loader_path")
+elseif(UNIX)
+  cmake_path(RELATIVE_PATH CMAKE_INSTALL_FULL_LIBDIR
+             BASE_DIRECTORY ${CMAKE_INSTALL_FULL_BINDIR}
+             OUTPUT_VARIABLE libdir_relative_path)
+  set_target_properties(sat_runner PROPERTIES
+                        INSTALL_RPATH "$ORIGIN/${libdir_relative_path}")
+endif()
 
 install(TARGETS sat_runner)

@@ -14,14 +14,13 @@
 #include "ortools/sat/timetable_edgefinding.h"
 
 #include <algorithm>
-#include <cstdint>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "ortools/base/iterator_adaptors.h"
-#include "ortools/base/logging.h"
-#include "ortools/sat/implied_bounds.h"
 #include "ortools/sat/integer.h"
 #include "ortools/sat/intervals.h"
+#include "ortools/sat/model.h"
 #include "ortools/util/strong_integers.h"
 
 namespace operations_research {
@@ -69,8 +68,8 @@ void TimeTableEdgeFinding::BuildTimeTable() {
   ecp_.clear();
 
   // Build start of compulsory part events.
-  for (const auto task_time :
-       ::gtl::reversed_view(helper_->TaskByDecreasingStartMax())) {
+  const auto by_decreasing_start_max = helper_->TaskByDecreasingStartMax();
+  for (const auto task_time : ::gtl::reversed_view(by_decreasing_start_max)) {
     const int t = task_time.task_index;
     if (!helper_->IsPresent(t)) continue;
     if (task_time.time < helper_->EndMin(t)) {
@@ -89,15 +88,13 @@ void TimeTableEdgeFinding::BuildTimeTable() {
 
   DCHECK_EQ(scp_.size(), ecp_.size());
 
-  const std::vector<TaskTime>& by_decreasing_end_max =
-      helper_->TaskByDecreasingEndMax();
-  const std::vector<TaskTime>& by_start_min =
-      helper_->TaskByIncreasingStartMin();
+  const auto by_decreasing_end_max = helper_->TaskByDecreasingEndMax();
+  const auto by_start_min = helper_->TaskByIncreasingStartMin();
 
   IntegerValue height = IntegerValue(0);
   IntegerValue energy = IntegerValue(0);
 
-  // We don't care since at the beginning heigh is zero, and previous_time will
+  // We don't care since at the beginning height is zero, and previous_time will
   // be correct after the first iteration.
   IntegerValue previous_time = IntegerValue(0);
 
@@ -285,7 +282,12 @@ bool TimeTableEdgeFinding::TimeTableEdgeFindingPass() {
       // interval are entirely contained in it.
       // TODO(user): check that we should not fail if the interval is
       // overloaded, i.e., available_energy < 0.
-      if (max_task == -1) continue;
+      //
+      // We also defensively abort if the demand_min is 0.
+      // This may happen along a energy_min > 0 if the literals in the
+      // decomposed_energy have been fixed, and not yet propagated to the demand
+      // affine expression.
+      if (max_task == -1 || demands_->DemandMin(max_task) == 0) continue;
 
       // Compute the amount of energy available to schedule max_task.
       const IntegerValue window_energy =
@@ -322,7 +324,7 @@ bool TimeTableEdgeFinding::TimeTableEdgeFindingPass() {
       //
       // TODO(user): Because this use updated bounds, it might be more than what
       // we accounted for in the precomputation. This is correct but could be
-      // improved uppon.
+      // improved upon.
       const IntegerValue mandatory_size_in_window =
           std::max(IntegerValue(0),
                    std::min(window_max, helper_->EndMin(max_task)) -

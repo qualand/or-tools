@@ -24,9 +24,9 @@
 #include <type_traits>
 #include <vector>
 
-#include "ortools/base/integral_types.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/strong_vector.h"
+#include "ortools/base/types.h"
 #include "ortools/util/bitset.h"
 #include "ortools/util/strong_integers.h"
 
@@ -318,6 +318,11 @@ class StrictITIVector : public absl::StrongVector<IntType, T> {
   View view() { return View(ParentType::data(), size()); }
   ConstView const_view() const { return ConstView(ParentType::data(), size()); }
   ConstView view() const { return const_view(); }
+
+  StrictITIVector& operator=(ConstView data) {
+    ParentType::assign(data.begin(), data.end());
+    return *this;
+  }
 
   // Since calls to resize() must use a default value, we introduce a new
   // function for convenience to reduce the size of a vector.

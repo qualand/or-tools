@@ -20,9 +20,9 @@
 
 #include "absl/log/check.h"
 #include "absl/strings/str_format.h"
-#include "ortools/base/integral_types.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/stl_util.h"
+#include "ortools/base/types.h"
 #include "ortools/port/sysinfo.h"
 #include "ortools/port/utf8.h"
 
@@ -240,20 +240,5 @@ std::string IntegerDistribution::ValueAsString() const {
   return absl::StrFormat("%8u [%8.f, %8.f] %8.2f %8.2f %8.f\n", num_, min_,
                          max_, Average(), StdDeviation(), sum_);
 }
-
-#ifdef HAS_PERF_SUBSYSTEM
-EnabledScopedInstructionCounter::EnabledScopedInstructionCounter(
-    absl::string_view name, TimeLimit* time_limit)
-    : time_limit_(time_limit), name_(name) {
-  starting_count_ =
-      time_limit_ != nullptr ? time_limit_->ReadInstructionCounter() : 0;
-}
-
-EnabledScopedInstructionCounter::~EnabledScopedInstructionCounter() {
-  ending_count_ =
-      time_limit_ != nullptr ? time_limit_->ReadInstructionCounter() : 0;
-  LOG(INFO) << name_ << ", Instructions: " << ending_count_ - starting_count_;
-}
-#endif  // HAS_PERF_SUBSYSTEM
 
 }  // namespace operations_research

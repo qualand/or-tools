@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <limits>
 #include <string>
 #include <utility>
@@ -25,8 +24,10 @@
 #include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
 #include "absl/meta/type_traits.h"
 #include "absl/strings/str_cat.h"
+#include "absl/types/span.h"
 #include "ortools/base/logging.h"
 #include "ortools/port/proto_utils.h"
 #include "ortools/sat/cp_model.pb.h"
@@ -222,12 +223,23 @@ int64_t MaxOfExpression(const CpModelProto& model,
   return sum_max;
 }
 
-int64_t IntervalSizeMin(const CpModelProto& model, int interval_index) {
-  DCHECK_EQ(ConstraintProto::ConstraintCase::kInterval,
-            model.constraints(interval_index).constraint_case());
-  const IntervalConstraintProto& proto =
-      model.constraints(interval_index).interval();
-  return MinOfExpression(model, proto.size());
+bool ExpressionIsFixed(const CpModelProto& model,
+                       const LinearExpressionProto& expr) {
+  for (int i = 0; i < expr.vars_size(); ++i) {
+    if (expr.coeffs(i) == 0) continue;
+    const IntegerVariableProto& var_proto = model.variables(expr.vars(i));
+    if (var_proto.domain_size() != 2 ||
+        var_proto.domain(0) != var_proto.domain(1)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int64_t ExpressionFixedValue(const CpModelProto& model,
+                             const LinearExpressionProto& expr) {
+  DCHECK(ExpressionIsFixed(model, expr));
+  return MinOfExpression(model, expr);
 }
 
 int64_t IntervalSizeMax(const CpModelProto& model, int interval_index) {
@@ -253,6 +265,12 @@ std::string ValidateLinearExpression(const CpModelProto& model,
                               expr.offset())) {
     return absl::StrCat("Possible overflow in linear expression: ",
                         ProtobufShortDebugString(expr));
+  }
+  for (const int ref : expr.vars()) {
+    if (!RefIsPositive(ref)) {
+      return absl::StrCat("Invalid negated reference in linear expression: ",
+                          ProtobufShortDebugString(expr));
+    }
   }
   return "";
 }
@@ -320,33 +338,38 @@ std::string ValidateIntModConstraint(const CpModelProto& model,
 
 std::string ValidateIntProdConstraint(const CpModelProto& model,
                                       const ConstraintProto& ct) {
-  if (ct.int_prod().exprs().size() != 2) {
-    return absl::StrCat("An int_prod constraint should have exactly 2 terms: ",
-                        ProtobufShortDebugString(ct));
-  }
   if (!ct.int_prod().has_target()) {
     return absl::StrCat("An int_prod constraint should have a target: ",
                         ProtobufShortDebugString(ct));
   }
 
-  RETURN_IF_NOT_EMPTY(ValidateAffineExpression(model, ct.int_prod().exprs(0)));
-  RETURN_IF_NOT_EMPTY(ValidateAffineExpression(model, ct.int_prod().exprs(1)));
+  for (const LinearExpressionProto& expr : ct.int_prod().exprs()) {
+    RETURN_IF_NOT_EMPTY(ValidateAffineExpression(model, expr));
+  }
   RETURN_IF_NOT_EMPTY(ValidateAffineExpression(model, ct.int_prod().target()));
 
-  // Detect potential overflow if some of the variables span across 0.
-  const LinearExpressionProto& expr0 = ct.int_prod().exprs(0);
-  const LinearExpressionProto& expr1 = ct.int_prod().exprs(1);
-  const Domain product_domain =
-      Domain({MinOfExpression(model, expr0), MaxOfExpression(model, expr0)})
-          .ContinuousMultiplicationBy(Domain(
-              {MinOfExpression(model, expr1), MaxOfExpression(model, expr1)}));
-  if ((product_domain.Max() == std::numeric_limits<int64_t>::max() &&
-       product_domain.Min() < 0) ||
-      (product_domain.Min() == std::numeric_limits<int64_t>::min() &&
-       product_domain.Max() > 0)) {
+  // Detect potential overflow.
+  Domain product_domain(1);
+  for (const LinearExpressionProto& expr : ct.int_prod().exprs()) {
+    product_domain = product_domain.ContinuousMultiplicationBy(
+        {MinOfExpression(model, expr), MaxOfExpression(model, expr)});
+  }
+
+  if (product_domain.Max() <= -std ::numeric_limits<int64_t>::max() ||
+      product_domain.Min() >= std::numeric_limits<int64_t>::max()) {
+    return absl::StrCat("integer overflow in constraint: ",
+                        ProtobufShortDebugString(ct));
+  }
+
+  // We need to expand the product when its arity is > 2. In that case, we must
+  // be strict with overflows.
+  if (ct.int_prod().exprs_size() > 2 &&
+      (product_domain.Max() >= std ::numeric_limits<int64_t>::max() ||
+       product_domain.Min() <= -std::numeric_limits<int64_t>::max())) {
     return absl::StrCat("Potential integer overflow in constraint: ",
                         ProtobufShortDebugString(ct));
   }
+
   return "";
 }
 
@@ -365,13 +388,22 @@ std::string ValidateIntDivConstraint(const CpModelProto& model,
   RETURN_IF_NOT_EMPTY(ValidateAffineExpression(model, ct.int_div().exprs(1)));
   RETURN_IF_NOT_EMPTY(ValidateAffineExpression(model, ct.int_div().target()));
 
-  const LinearExpressionProto& divisor_proto = ct.int_div().exprs(1);
-  if (MinOfExpression(model, divisor_proto) <= 0 &&
-      MaxOfExpression(model, divisor_proto) >= 0) {
-    return absl::StrCat("The divisor cannot span across zero in constraint: ",
-                        ProtobufShortDebugString(ct));
+  const LinearExpressionProto& denom = ct.int_div().exprs(1);
+  const int64_t offset = denom.offset();
+  if (ExpressionIsFixed(model, denom)) {
+    if (ExpressionFixedValue(model, denom) == 0) {
+      return absl::StrCat("Division by 0: ", ProtobufShortDebugString(ct));
+    }
+  } else {
+    const int64_t coeff = denom.coeffs(0);
+    CHECK_NE(coeff, 0);
+    const int64_t inverse_of_zero = -offset / coeff;
+    if (inverse_of_zero * coeff + offset == 0 &&
+        DomainOfRef(model, denom.vars(0)).Contains(inverse_of_zero)) {
+      return absl::StrCat("The domain of the divisor cannot contain 0: ",
+                          ProtobufShortDebugString(ct));
+    }
   }
-
   return "";
 }
 
@@ -399,8 +431,7 @@ std::string ValidateElementConstraint(const CpModelProto& model,
   return "";
 }
 
-std::string ValidateTableConstraint(const CpModelProto& model,
-                                    const ConstraintProto& ct) {
+std::string ValidateTableConstraint(const ConstraintProto& ct) {
   const TableConstraintProto& arg = ct.table();
   if (arg.vars().empty()) return "";
   if (arg.values().size() % arg.vars().size() != 0) {
@@ -412,8 +443,7 @@ std::string ValidateTableConstraint(const CpModelProto& model,
   return "";
 }
 
-std::string ValidateAutomatonConstraint(const CpModelProto& model,
-                                        const ConstraintProto& ct) {
+std::string ValidateAutomatonConstraint(const ConstraintProto& ct) {
   const int num_transistions = ct.automaton().transition_tail().size();
   if (num_transistions != ct.automaton().transition_head().size() ||
       num_transistions != ct.automaton().transition_label().size()) {
@@ -448,8 +478,7 @@ std::string ValidateAutomatonConstraint(const CpModelProto& model,
 }
 
 template <typename GraphProto>
-std::string ValidateGraphInput(bool is_route, const CpModelProto& model,
-                               const GraphProto& graph) {
+std::string ValidateGraphInput(bool is_route, const GraphProto& graph) {
   const int size = graph.tails().size();
   if (graph.heads().size() != size || graph.literals().size() != size) {
     return absl::StrCat("Wrong field sizes in graph: ",
@@ -498,7 +527,7 @@ std::string ValidateRoutesConstraint(const CpModelProto& model,
         "All nodes in a route constraint must have incident arcs");
   }
 
-  return ValidateGraphInput(/*is_route=*/true, model, ct.routes());
+  return ValidateGraphInput(/*is_route=*/true, ct.routes());
 }
 
 std::string ValidateDomainIsPositive(const CpModelProto& model, int ref,
@@ -569,7 +598,7 @@ std::string ValidateIntervalConstraint(const CpModelProto& model,
   if (ct.enforcement_literal().empty() &&
       MinOfExpression(model, arg.size()) < 0) {
     return absl::StrCat(
-        "The size of an performed interval must be >= 0 in constraint: ",
+        "The size of a performed interval must be >= 0 in constraint: ",
         ProtobufDebugString(ct));
   }
   AppendToOverflowValidator(arg.size(), &for_overflow_validation);
@@ -879,23 +908,36 @@ bool PossibleIntegerOverflow(const CpModelProto& model,
     sum_min = CapAdd(sum_min, std::min(int64_t{0}, std::min(prod1, prod2)));
     sum_max = CapAdd(sum_max, std::max(int64_t{0}, std::max(prod1, prod2)));
     for (const int64_t v : {prod1, prod2, sum_min, sum_max}) {
-      if (v == std::numeric_limits<int64_t>::max() ||
-          v == std::numeric_limits<int64_t>::min())
-        return true;
+      if (AtMinOrMaxInt64(v)) return true;
     }
   }
 
   // In addition to computing the min/max possible sum, we also often compare
   // it with the constraint bounds, so we do not want max - min to overflow.
-  // We might also create an intermediate variable to represent the sum. It
+  // We might also create an intermediate variable to represent the sum.
   if (sum_min < std::numeric_limits<int64_t>::min() / 2) return true;
   if (sum_max > std::numeric_limits<int64_t>::max() / 2) return true;
   return false;
 }
 
 std::string ValidateCpModel(const CpModelProto& model, bool after_presolve) {
+  int64_t int128_overflow = 0;
   for (int v = 0; v < model.variables_size(); ++v) {
     RETURN_IF_NOT_EMPTY(ValidateIntegerVariable(model, v));
+
+    const auto& domain = model.variables(v).domain();
+    const int64_t min = domain[0];
+    const int64_t max = domain[domain.size() - 1];
+    int128_overflow = CapAdd(
+        int128_overflow, std::max({std::abs(min), std::abs(max), max - min}));
+  }
+
+  // We require this precondition so that we can take any linear combination of
+  // variable with coefficient in int64_t and compute the activity on an int128
+  // with no overflow. This is useful during cut computation.
+  if (int128_overflow == std::numeric_limits<int64_t>::max()) {
+    return "The sum of all variable domains do not fit on an int64_t. This is "
+           "needed to prevent overflows.";
   }
 
   // We need to validate the intervals used first, so we add these constraints
@@ -954,14 +996,15 @@ std::string ValidateCpModel(const CpModelProto& model, bool after_presolve) {
         RETURN_IF_NOT_EMPTY(ValidateElementConstraint(model, ct));
         break;
       case ConstraintProto::ConstraintCase::kTable:
-        RETURN_IF_NOT_EMPTY(ValidateTableConstraint(model, ct));
+        RETURN_IF_NOT_EMPTY(ValidateTableConstraint(ct));
+        support_enforcement = true;
         break;
       case ConstraintProto::ConstraintCase::kAutomaton:
-        RETURN_IF_NOT_EMPTY(ValidateAutomatonConstraint(model, ct));
+        RETURN_IF_NOT_EMPTY(ValidateAutomatonConstraint(ct));
         break;
       case ConstraintProto::ConstraintCase::kCircuit:
         RETURN_IF_NOT_EMPTY(
-            ValidateGraphInput(/*is_route=*/false, model, ct.circuit()));
+            ValidateGraphInput(/*is_route=*/false, ct.circuit()));
         break;
       case ConstraintProto::ConstraintCase::kRoutes:
         RETURN_IF_NOT_EMPTY(ValidateRoutesConstraint(model, ct));
@@ -1287,10 +1330,7 @@ class ConstraintChecker {
       for (int i = 0; i < num_intervals; ++i) {
         const ConstraintProto& x = model.constraints(arg.x_intervals(i));
         const ConstraintProto& y = model.constraints(arg.y_intervals(i));
-        if (ConstraintIsEnforced(x) && ConstraintIsEnforced(y) &&
-            (!arg.boxes_with_null_area_can_overlap() ||
-             (!IntervalIsEmpty(x.interval()) &&
-              !IntervalIsEmpty(y.interval())))) {
+        if (ConstraintIsEnforced(x) && ConstraintIsEnforced(y)) {
           enforced_intervals_xy.push_back({&x.interval(), &y.interval()});
         }
       }
@@ -1302,9 +1342,7 @@ class ConstraintChecker {
         const auto& yi = *enforced_intervals_xy[i].second;
         const auto& xj = *enforced_intervals_xy[j].first;
         const auto& yj = *enforced_intervals_xy[j].second;
-        if (!IntervalsAreDisjoint(xi, xj) && !IntervalsAreDisjoint(yi, yj) &&
-            !IntervalIsEmpty(xi) && !IntervalIsEmpty(xj) &&
-            !IntervalIsEmpty(yi) && !IntervalIsEmpty(yj)) {
+        if (!IntervalsAreDisjoint(xi, xj) && !IntervalsAreDisjoint(yi, yj)) {
           VLOG(1) << "Interval " << i << "(x=[" << IntervalStart(xi) << ", "
                   << IntervalEnd(xi) << "], y=[" << IntervalStart(yi) << ", "
                   << IntervalEnd(yi) << "]) and " << j << "(x=["
@@ -1320,30 +1358,34 @@ class ConstraintChecker {
 
   bool CumulativeConstraintIsFeasible(const CpModelProto& model,
                                       const ConstraintProto& ct) {
-    // TODO(user): Improve complexity for large durations.
     const int64_t capacity = LinearExpressionValue(ct.cumulative().capacity());
     const int num_intervals = ct.cumulative().intervals_size();
-    absl::flat_hash_map<int64_t, int64_t> usage;
+    std::vector<std::pair<int64_t, int64_t>> events;
     for (int i = 0; i < num_intervals; ++i) {
       const ConstraintProto& interval_constraint =
           model.constraints(ct.cumulative().intervals(i));
-      if (ConstraintIsEnforced(interval_constraint)) {
-        const IntervalConstraintProto& interval =
-            interval_constraint.interval();
-        const int64_t start = IntervalStart(interval);
-        const int64_t duration = IntervalSize(interval);
-        const int64_t demand =
-            LinearExpressionValue(ct.cumulative().demands(i));
-        for (int64_t t = start; t < start + duration; ++t) {
-          usage[t] += demand;
-          if (usage[t] > capacity) {
-            VLOG(1) << "time: " << t << " usage: " << usage[t]
-                    << " capa: " << capacity;
-            return false;
-          }
-        }
+      if (!ConstraintIsEnforced(interval_constraint)) continue;
+      const int64_t start = IntervalStart(interval_constraint.interval());
+      const int64_t duration = IntervalSize(interval_constraint.interval());
+      const int64_t demand = LinearExpressionValue(ct.cumulative().demands(i));
+      if (duration == 0 || demand == 0) continue;
+      events.emplace_back(start, demand);
+      events.emplace_back(start + duration, -demand);
+    }
+    if (events.empty()) return true;
+
+    std::sort(events.begin(), events.end());
+
+    int64_t current_load = 0;
+    for (const auto& [time, delta] : events) {
+      current_load += delta;
+      if (current_load > capacity) {
+        VLOG(1) << "Cumulative constraint: load: " << current_load
+                << " capacity: " << capacity << " time: " << time;
+        return false;
       }
     }
+    DCHECK_EQ(current_load, 0);
     return true;
   }
 

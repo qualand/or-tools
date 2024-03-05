@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <string>
@@ -23,12 +24,13 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/types/span.h"
 #include "ortools/base/commandlineflags.h"
-#include "ortools/base/integral_types.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/map_util.h"
 #include "ortools/base/mathutil.h"
 #include "ortools/base/stl_util.h"
+#include "ortools/base/types.h"
 #include "ortools/constraint_solver/constraint_solver.h"
 #include "ortools/constraint_solver/constraint_solveri.h"
 #include "ortools/util/bitset.h"
@@ -401,7 +403,7 @@ class DomainIntVar : public IntVar {
 
     virtual IntVar* GetOrMakeValueWatcher(int64_t value) = 0;
 
-    virtual void SetValueWatcher(IntVar* const boolvar, int64_t value) = 0;
+    virtual void SetValueWatcher(IntVar* boolvar, int64_t value) = 0;
   };
 
   // This class monitors the domain of the variable and updates the
@@ -885,7 +887,7 @@ class DomainIntVar : public IntVar {
 
     virtual IntVar* GetOrMakeUpperBoundWatcher(int64_t value) = 0;
 
-    virtual void SetUpperBoundWatcher(IntVar* const boolvar, int64_t value) = 0;
+    virtual void SetUpperBoundWatcher(IntVar* boolvar, int64_t value) = 0;
   };
 
   // This class watches the bounds of the variable and updates the
@@ -1329,9 +1331,8 @@ class DomainIntVar : public IntVar {
   };
 
   // ----- Main Class -----
-  DomainIntVar(Solver* const s, int64_t vmin, int64_t vmax,
-               const std::string& name);
-  DomainIntVar(Solver* const s, const std::vector<int64_t>& sorted_values,
+  DomainIntVar(Solver* s, int64_t vmin, int64_t vmax, const std::string& name);
+  DomainIntVar(Solver* s, const std::vector<int64_t>& sorted_values,
                const std::string& name);
   ~DomainIntVar() override;
 
@@ -1421,7 +1422,7 @@ class DomainIntVar : public IntVar {
     }
   }
 
-  Constraint* SetIsEqual(const std::vector<int64_t>& values,
+  Constraint* SetIsEqual(absl::Span<const int64_t> values,
                          const std::vector<IntVar*>& vars) {
     if (value_watcher_ == nullptr) {
       solver()->SaveAndSetValue(reinterpret_cast<void**>(&value_watcher_),
@@ -1497,7 +1498,7 @@ class DomainIntVar : public IntVar {
     }
   }
 
-  Constraint* SetIsGreaterOrEqual(const std::vector<int64_t>& values,
+  Constraint* SetIsGreaterOrEqual(absl::Span<const int64_t> values,
                                   const std::vector<IntVar*>& vars) {
     if (bound_watcher_ == nullptr) {
       if (CapSub(Max(), Min()) <= 256) {
@@ -1627,7 +1628,7 @@ class SimpleBitSet : public DomainIntVar::BitSet {
     }
   }
 
-  SimpleBitSet(Solver* const s, const std::vector<int64_t>& sorted_values,
+  SimpleBitSet(Solver* const s, absl::Span<const int64_t> sorted_values,
                int64_t vmin, int64_t vmax)
       : BitSet(s),
         bits_(nullptr),
@@ -1822,7 +1823,7 @@ class SmallBitSet : public DomainIntVar::BitSet {
     bits_ = OneRange64(0, size_.Value() - 1);
   }
 
-  SmallBitSet(Solver* const s, const std::vector<int64_t>& sorted_values,
+  SmallBitSet(Solver* const s, absl::Span<const int64_t> sorted_values,
               int64_t vmin, int64_t vmax)
       : BitSet(s),
         bits_(uint64_t{0}),
@@ -2898,7 +2899,7 @@ class SubCstIntVar : public IntVar {
     const int64_t cst_;
   };
 
-  SubCstIntVar(Solver* const s, IntVar* v, int64_t c);
+  SubCstIntVar(Solver* s, IntVar* v, int64_t c);
   ~SubCstIntVar() override;
 
   int64_t Min() const override;
@@ -3032,7 +3033,7 @@ class OppIntVar : public IntVar {
     int64_t Value() const override { return -iterator_->Value(); }
   };
 
-  OppIntVar(Solver* const s, IntVar* v);
+  OppIntVar(Solver* s, IntVar* v);
   ~OppIntVar() override;
 
   int64_t Min() const override;
@@ -3208,7 +3209,7 @@ class TimesPosCstIntVar : public TimesCstIntVar {
     const int64_t cst_;
   };
 
-  TimesPosCstIntVar(Solver* const s, IntVar* v, int64_t c);
+  TimesPosCstIntVar(Solver* s, IntVar* v, int64_t c);
   ~TimesPosCstIntVar() override;
 
   int64_t Min() const override;
@@ -3323,7 +3324,7 @@ class TimesPosCstBoolVar : public TimesCstIntVar {
     const int64_t cst_;
   };
 
-  TimesPosCstBoolVar(Solver* const s, BooleanVar* v, int64_t c);
+  TimesPosCstBoolVar(Solver* s, BooleanVar* v, int64_t c);
   ~TimesPosCstBoolVar() override;
 
   int64_t Min() const override;
@@ -3474,7 +3475,7 @@ class TimesNegCstIntVar : public TimesCstIntVar {
     const int64_t cst_;
   };
 
-  TimesNegCstIntVar(Solver* const s, IntVar* v, int64_t c);
+  TimesNegCstIntVar(Solver* s, IntVar* v, int64_t c);
   ~TimesNegCstIntVar() override;
 
   int64_t Min() const override;
@@ -6205,6 +6206,10 @@ class ExprWithEscapeValue : public BaseIntExpr {
         expression_(e),
         unperformed_value_(unperformed_value) {}
 
+  // This type is neither copyable nor movable.
+  ExprWithEscapeValue(const ExprWithEscapeValue&) = delete;
+  ExprWithEscapeValue& operator=(const ExprWithEscapeValue&) = delete;
+
   ~ExprWithEscapeValue() override {}
 
   int64_t Min() const override {
@@ -6301,7 +6306,6 @@ class ExprWithEscapeValue : public BaseIntExpr {
   IntVar* const condition_;
   IntExpr* const expression_;
   const int64_t unperformed_value_;
-  DISALLOW_COPY_AND_ASSIGN(ExprWithEscapeValue);
 };
 
 // ----- This is a specialized case when the variable exact type is known -----
@@ -6378,7 +6382,7 @@ IntVarIterator* BooleanVar::MakeDomainIterator(bool reversible) const {
 
 // ----- API -----
 
-void CleanVariableOnFail(IntVar* const var) {
+void CleanVariableOnFail(IntVar* var) {
   DCHECK_EQ(DOMAIN_INT_VAR, var->VarType());
   DomainIntVar* const dvar = reinterpret_cast<DomainIntVar*>(var);
   dvar->CleanInProcess();
@@ -6399,7 +6403,7 @@ Constraint* SetIsGreaterOrEqual(IntVar* const var,
   return dvar->SetIsGreaterOrEqual(values, vars);
 }
 
-void RestoreBoolValue(IntVar* const var) {
+void RestoreBoolValue(IntVar* var) {
   DCHECK_EQ(BOOLEAN_VAR, var->VarType());
   BooleanVar* const boolean_var = reinterpret_cast<BooleanVar*>(var);
   boolean_var->RestoreValue();
@@ -6783,7 +6787,7 @@ IntExpr* Solver::MakeDifference(int64_t value, IntExpr* const expr) {
 IntExpr* Solver::MakeOpposite(IntExpr* const expr) {
   CHECK_EQ(this, expr->solver());
   if (expr->Bound()) {
-    return MakeIntConst(-expr->Min());
+    return MakeIntConst(CapOpp(expr->Min()));
   }
   IntExpr* result =
       Cache()->FindExprExpression(expr, ModelCache::EXPR_OPPOSITE);
@@ -7407,7 +7411,7 @@ void IntVar::SetValues(const std::vector<int64_t>& values) {
       // that uses a global, static shared (and locked) storage.
       // TODO(user): [optional] consider porting
       // STLSortAndRemoveDuplicates from ortools/base/stl_util.h to the
-      // existing open_source/base/stl_util.h and using it here.
+      // existing base/stl_util.h and using it here.
       // TODO(user): We could filter out values not in the var.
       std::vector<int64_t>& tmp = solver()->tmp_vector_;
       tmp.clear();
@@ -7448,7 +7452,7 @@ void IntVar::SetValues(const std::vector<int64_t>& values) {
 }
 // ---------- BaseIntExpr ---------
 
-void LinkVarExpr(Solver* const s, IntExpr* const expr, IntVar* const var) {
+void LinkVarExpr(Solver* s, IntExpr* expr, IntVar* var) {
   if (!var->Bound()) {
     if (var->VarType() == DOMAIN_INT_VAR) {
       DomainIntVar* dvar = reinterpret_cast<DomainIntVar*>(var);

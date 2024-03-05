@@ -47,6 +47,10 @@ class UpdateRow {
             const VariablesInfo& variables_info, const RowToColMapping& basis,
             const BasisFactorization& basis_factorization);
 
+  // This type is neither copyable nor movable.
+  UpdateRow(const UpdateRow&) = delete;
+  UpdateRow& operator=(const UpdateRow&) = delete;
+
   // Invalidates the current update row and unit_row_left_inverse so the next
   // call to ComputeUpdateRow() will recompute everything and not just return
   // right away.
@@ -67,7 +71,7 @@ class UpdateRow {
   const ScatteredRow& GetUnitRowLeftInverse() const;
 
   // Returns true if ComputeUpdateRow() was called since the last Invalidate().
-  const bool IsComputedFor(RowIndex leaving_row) const {
+  bool IsComputedFor(RowIndex leaving_row) const {
     return update_row_computed_for_ == leaving_row;
   }
 
@@ -78,10 +82,8 @@ class UpdateRow {
   // GetNonZeroPositions() instead. It should be fast to compute and iteration
   // later should be quicker.
   const DenseRow& GetCoefficients() const;
-  const ColIndexVector& GetNonZeroPositions() const;
-  const Fractional GetCoefficient(ColIndex col) const {
-    return coefficient_[col];
-  }
+  absl::Span<const ColIndex> GetNonZeroPositions() const;
+  Fractional GetCoefficient(ColIndex col) const { return coefficient_[col]; }
 
   // Computes the update row including all position and fill output with it.
   // We only use this when ComputeUnitRowLeftInverse() has already been called
@@ -135,6 +137,7 @@ class UpdateRow {
 
   // Holds the current update row data.
   // Note that non_zero_position_set_ is not always up to date.
+  int num_non_zeros_ = 0;
   ColIndexVector non_zero_position_list_;
   DenseBitRow non_zero_position_set_;
   DenseRow coefficient_;
@@ -164,8 +167,6 @@ class UpdateRow {
   // Glop standard classes.
   GlopParameters parameters_;
   Stats stats_;
-
-  DISALLOW_COPY_AND_ASSIGN(UpdateRow);
 };
 
 }  // namespace glop

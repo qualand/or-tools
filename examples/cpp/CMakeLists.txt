@@ -1,3 +1,16 @@
+# Copyright 2010-2022 Google LLC
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 if(NOT BUILD_CXX_EXAMPLES)
   return()
 endif()
@@ -43,7 +56,6 @@ list(FILTER CXX_SRCS EXCLUDE REGEX ".*/pdlp_solve.cc")
 list(FILTER CXX_SRCS EXCLUDE REGEX ".*/pdptw.cc")
 list(FILTER CXX_SRCS EXCLUDE REGEX ".*/shift_minimization_sat.cc")
 list(FILTER CXX_SRCS EXCLUDE REGEX ".*/pdlp_solve.cc")
-list(FILTER CXX_SRCS EXCLUDE REGEX ".*/sports_scheduling_sat.cc") # Too long
 list(FILTER CXX_SRCS EXCLUDE REGEX ".*/strawberry_fields_with_column_generation.cc") # Too long
 list(FILTER CXX_SRCS EXCLUDE REGEX ".*/vector_bin_packing_solver.cc")
 list(FILTER CXX_SRCS EXCLUDE REGEX ".*/weighted_tardiness_sat.cc")

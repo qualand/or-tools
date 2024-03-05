@@ -35,14 +35,13 @@
 #include "absl/time/time.h"
 #include "ortools/base/commandlineflags.h"
 #include "ortools/base/file.h"
-#include "ortools/base/integral_types.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/macros.h"
 #include "ortools/base/map_util.h"
 #include "ortools/base/recordio.h"
 #include "ortools/base/stl_util.h"
 #include "ortools/base/sysinfo.h"
 #include "ortools/base/timer.h"
+#include "ortools/base/types.h"
 #include "ortools/constraint_solver/constraint_solveri.h"
 #include "ortools/util/tuple_set.h"
 #include "zlib.h"
@@ -171,12 +170,12 @@ ConstraintSolverParameters Solver::DefaultSolverParameters() {
 }
 
 // ----- Forward Declarations and Profiling Support -----
-extern DemonProfiler* BuildDemonProfiler(Solver* const solver);
-extern void DeleteDemonProfiler(DemonProfiler* const monitor);
-extern void InstallDemonProfiler(DemonProfiler* const monitor);
+extern void InstallDemonProfiler(DemonProfiler* monitor);
+extern DemonProfiler* BuildDemonProfiler(Solver* solver);
+extern void DeleteDemonProfiler(DemonProfiler* monitor);
+extern void InstallLocalSearchProfiler(LocalSearchProfiler* monitor);
 extern LocalSearchProfiler* BuildLocalSearchProfiler(Solver* solver);
 extern void DeleteLocalSearchProfiler(LocalSearchProfiler* monitor);
-extern void InstallLocalSearchProfiler(LocalSearchProfiler* monitor);
 
 // TODO(user): remove this complex logic.
 // We need the double test because parameters are set too late when using
@@ -225,7 +224,7 @@ void Demon::desinhibit(Solver* const s) {
 
 // ------------------ Queue class ------------------
 
-extern void CleanVariableOnFail(IntVar* const var);
+extern void CleanVariableOnFail(IntVar* var);
 
 class Queue {
  public:
@@ -531,6 +530,10 @@ template <class T>
 class TrailPacker {
  public:
   explicit TrailPacker(int block_size) : block_size_(block_size) {}
+
+  // This type is neither copyable nor movable.
+  TrailPacker(const TrailPacker&) = delete;
+  TrailPacker& operator=(const TrailPacker&) = delete;
   virtual ~TrailPacker() {}
   int input_size() const { return block_size_ * sizeof(addrval<T>); }
   virtual void Pack(const addrval<T>* block, std::string* packed_block) = 0;
@@ -538,7 +541,6 @@ class TrailPacker {
 
  private:
   const int block_size_;
-  DISALLOW_COPY_AND_ASSIGN(TrailPacker);
 };
 
 template <class T>
@@ -546,6 +548,10 @@ class NoCompressionTrailPacker : public TrailPacker<T> {
  public:
   explicit NoCompressionTrailPacker(int block_size)
       : TrailPacker<T>(block_size) {}
+
+  // This type is neither copyable nor movable.
+  NoCompressionTrailPacker(const NoCompressionTrailPacker&) = delete;
+  NoCompressionTrailPacker& operator=(const NoCompressionTrailPacker&) = delete;
   ~NoCompressionTrailPacker() override {}
   void Pack(const addrval<T>* block, std::string* packed_block) override {
     DCHECK(block != nullptr);
@@ -558,9 +564,6 @@ class NoCompressionTrailPacker : public TrailPacker<T> {
     DCHECK(block != nullptr);
     memcpy(block, packed_block.c_str(), packed_block.size());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(NoCompressionTrailPacker);
 };
 
 template <class T>
@@ -570,6 +573,10 @@ class ZlibTrailPacker : public TrailPacker<T> {
       : TrailPacker<T>(block_size),
         tmp_size_(compressBound(this->input_size())),
         tmp_block_(new char[tmp_size_]) {}
+
+  // This type is neither copyable nor movable.
+  ZlibTrailPacker(const ZlibTrailPacker&) = delete;
+  ZlibTrailPacker& operator=(const ZlibTrailPacker&) = delete;
 
   ~ZlibTrailPacker() override {}
 
@@ -599,7 +606,6 @@ class ZlibTrailPacker : public TrailPacker<T> {
  private:
   const uint64_t tmp_size_;
   std::unique_ptr<char[]> tmp_block_;
-  DISALLOW_COPY_AND_ASSIGN(ZlibTrailPacker);
 };
 
 template <class T>
@@ -733,7 +739,7 @@ class CompressedTrail {
 // passing and storing a pointer. As objects are small, copying is
 // much faster than allocating (around 35% on a complete solve).
 
-extern void RestoreBoolValue(IntVar* const var);
+extern void RestoreBoolValue(IntVar* var);
 
 struct Trail {
   CompressedTrail<int> rev_ints_;
@@ -1009,11 +1015,11 @@ class Search {
   void EnterSearch();
   void RestartSearch();
   void ExitSearch();
-  void BeginNextDecision(DecisionBuilder* const db);
-  void EndNextDecision(DecisionBuilder* const db, Decision* const d);
-  void ApplyDecision(Decision* const d);
-  void AfterDecision(Decision* const d, bool apply);
-  void RefuteDecision(Decision* const d);
+  void BeginNextDecision(DecisionBuilder* db);
+  void EndNextDecision(DecisionBuilder* db, Decision* d);
+  void ApplyDecision(Decision* d);
+  void AfterDecision(Decision* d, bool apply);
+  void RefuteDecision(Decision* d);
   void BeginFail();
   void EndFail();
   void BeginInitialPropagation();
@@ -1028,7 +1034,7 @@ class Search {
   bool IsUncheckedSolutionLimitReached();
   void PeriodicCheck();
   int ProgressPercent();
-  void Accept(ModelVisitor* const visitor) const;
+  void Accept(ModelVisitor* visitor) const;
   void AddEventListener(Solver::MonitorEvent event, SearchMonitor* monitor) {
     if (monitor != nullptr) {
       monitor_event_listeners_[to_underlying(event)].push_back(monitor);
@@ -1077,7 +1083,7 @@ class Search {
       solver_->Fail();
     }
   }
-  void set_search_context(const std::string& search_context) {
+  void set_search_context(absl::string_view search_context) {
     search_context_ = search_context;
   }
   std::string search_context() const { return search_context_; }
@@ -1372,18 +1378,15 @@ void Search::Accept(ModelVisitor* const visitor) const {
 
 #undef CALL_EVENT_LISTENERS
 
-bool LocalOptimumReached(Search* const search) {
-  return search->LocalOptimum();
-}
+bool LocalOptimumReached(Search* search) { return search->LocalOptimum(); }
 
-bool AcceptDelta(Search* const search, Assignment* delta,
-                 Assignment* deltadelta) {
+bool AcceptDelta(Search* search, Assignment* delta, Assignment* deltadelta) {
   return search->AcceptDelta(delta, deltadelta);
 }
 
-void AcceptNeighbor(Search* const search) { search->AcceptNeighbor(); }
+void AcceptNeighbor(Search* search) { search->AcceptNeighbor(); }
 
-void AcceptUncheckedNeighbor(Search* const search) {
+void AcceptUncheckedNeighbor(Search* search) {
   search->AcceptUncheckedNeighbor();
 }
 
@@ -1421,9 +1424,9 @@ enum SentinelMarker {
 };
 }  // namespace
 
-extern PropagationMonitor* BuildTrace(Solver* const s);
-extern LocalSearchMonitor* BuildLocalSearchMonitorPrimary(Solver* const s);
-extern ModelCache* BuildModelCache(Solver* const solver);
+extern PropagationMonitor* BuildTrace(Solver* s);
+extern LocalSearchMonitor* BuildLocalSearchMonitorPrimary(Solver* s);
+extern ModelCache* BuildModelCache(Solver* solver);
 
 std::string Solver::model_name() const { return name_; }
 
@@ -1870,7 +1873,7 @@ void Solver::NewSearch(DecisionBuilder* const db, SearchMonitor* const m1,
   return NewSearch(db, monitors);
 }
 
-extern PropagationMonitor* BuildPrintTrace(Solver* const s);
+extern PropagationMonitor* BuildPrintTrace(Solver* s);
 
 // Opens a new top level search.
 void Solver::NewSearch(DecisionBuilder* const db,
@@ -2509,7 +2512,7 @@ std::string Solver::GetName(const PropagationBaseObject* object) {
 }
 
 void Solver::SetName(const PropagationBaseObject* object,
-                     const std::string& name) {
+                     absl::string_view name) {
   if (parameters_.store_names() &&
       GetName(object) != name) {  // in particular if name.empty()
     propagation_object_names_[object] = name;

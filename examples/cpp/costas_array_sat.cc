@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//
 // Costas Array Problem
 //
 // Finds an NxN matrix of 0s and 1s, with only one 1 per row,
@@ -33,8 +32,8 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "ortools/base/init_google.h"
-#include "ortools/base/integral_types.h"
 #include "ortools/base/logging.h"
+#include "ortools/base/types.h"
 #include "ortools/sat/cp_model.h"
 #include "ortools/sat/model.h"
 

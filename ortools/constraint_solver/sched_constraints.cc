@@ -28,9 +28,10 @@
 #include <vector>
 
 #include "absl/strings/str_format.h"
-#include "ortools/base/integral_types.h"
+#include "absl/strings/string_view.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/macros.h"
+#include "ortools/base/types.h"
 #include "ortools/constraint_solver/constraint_solver.h"
 #include "ortools/constraint_solver/constraint_solveri.h"
 #include "ortools/util/string_array.h"
@@ -63,7 +64,7 @@ class TreeArrayConstraint : public Constraint {
     root_node_ = &tree_[0][0];
   }
 
-  std::string DebugStringInternal(const std::string& name) const {
+  std::string DebugStringInternal(absl::string_view name) const {
     return absl::StrFormat("Cover(%s) == %s", JoinDebugStringPtr(vars_, ", "),
                            target_var_->DebugString());
   }

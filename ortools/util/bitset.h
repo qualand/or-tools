@@ -22,9 +22,8 @@
 #include <string>
 #include <vector>
 
-#include "ortools/base/integral_types.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/macros.h"
+#include "ortools/base/types.h"
 
 namespace operations_research {
 
@@ -368,37 +367,35 @@ inline void ClearBit32(uint32_t* const bitset, uint32_t pos) {
 }
 
 // Returns the number of bits set in bitset between positions start and end.
-uint64_t BitCountRange64(const uint64_t* const bitset, uint64_t start,
-                         uint64_t end);
-uint32_t BitCountRange32(const uint32_t* const bitset, uint32_t start,
-                         uint32_t end);
+uint64_t BitCountRange64(const uint64_t* bitset, uint64_t start, uint64_t end);
+uint32_t BitCountRange32(const uint32_t* bitset, uint32_t start, uint32_t end);
 
 // Returns true if no bits are set in bitset between start and end.
-bool IsEmptyRange64(const uint64_t* const bitset, uint64_t start, uint64_t end);
-bool IsEmptyRange32(const uint32_t* const bitset, uint32_t start, uint32_t end);
+bool IsEmptyRange64(const uint64_t* bitset, uint64_t start, uint64_t end);
+bool IsEmptyRange32(const uint32_t* bitset, uint32_t start, uint32_t end);
 
 // Returns the first bit set in bitset between start and max_bit.
-int64_t LeastSignificantBitPosition64(const uint64_t* const bitset,
-                                      uint64_t start, uint64_t end);
-int LeastSignificantBitPosition32(const uint32_t* const bitset, uint32_t start,
+int64_t LeastSignificantBitPosition64(const uint64_t* bitset, uint64_t start,
+                                      uint64_t end);
+int LeastSignificantBitPosition32(const uint32_t* bitset, uint32_t start,
                                   uint32_t end);
 
 // Returns the last bit set in bitset between min_bit and start.
-int64_t MostSignificantBitPosition64(const uint64_t* const bitset,
-                                     uint64_t start, uint64_t end);
-int MostSignificantBitPosition32(const uint32_t* const bitset, uint32_t start,
+int64_t MostSignificantBitPosition64(const uint64_t* bitset, uint64_t start,
+                                     uint64_t end);
+int MostSignificantBitPosition32(const uint32_t* bitset, uint32_t start,
                                  uint32_t end);
 
 // Unsafe versions of the functions above where respectively end and start
 // are supposed to be set.
-int64_t UnsafeLeastSignificantBitPosition64(const uint64_t* const bitset,
+int64_t UnsafeLeastSignificantBitPosition64(const uint64_t* bitset,
                                             uint64_t start, uint64_t end);
-int32_t UnsafeLeastSignificantBitPosition32(const uint32_t* const bitset,
+int32_t UnsafeLeastSignificantBitPosition32(const uint32_t* bitset,
                                             uint32_t start, uint32_t end);
 
-int64_t UnsafeMostSignificantBitPosition64(const uint64_t* const bitset,
+int64_t UnsafeMostSignificantBitPosition64(const uint64_t* bitset,
                                            uint64_t start, uint64_t end);
-int32_t UnsafeMostSignificantBitPosition32(const uint32_t* const bitset,
+int32_t UnsafeMostSignificantBitPosition32(const uint32_t* bitset,
                                            uint32_t start, uint32_t end);
 
 // Returns a mask with the bits pos % 64 and (pos ^ 1) % 64 sets.
@@ -434,6 +431,10 @@ class Bitset64 {
   explicit Bitset64(IndexType size)
       : size_(Value(size) > 0 ? size : IndexType(0)),
         data_(BitLength64(Value(size_))) {}
+
+  // This type is neither copyable nor movable.
+  Bitset64(const Bitset64&) = delete;
+  Bitset64& operator=(const Bitset64&) = delete;
 
   ConstView const_view() const { return ConstView(this); }
 
@@ -629,15 +630,15 @@ class Bitset64 {
   // Cryptic function! This is just an optimized version of a given piece of
   // code and has probably little general use.
   static uint64_t ConditionalXorOfTwoBits(IndexType i, uint64_t use1,
-                                          const Bitset64<IndexType>& set1,
+                                          Bitset64<IndexType>::ConstView set1,
                                           uint64_t use2,
-                                          const Bitset64<IndexType>& set2) {
+                                          Bitset64<IndexType>::ConstView set2) {
     DCHECK(use1 == 0 || use1 == 1);
     DCHECK(use2 == 0 || use2 == 1);
     const int bucket = BitOffset64(Value(i));
     const int pos = BitPos64(Value(i));
-    return ((use1 << pos) & set1.data_[bucket]) ^
-           ((use2 << pos) & set2.data_[bucket]);
+    return ((use1 << pos) & set1.data()[bucket]) ^
+           ((use2 << pos) & set2.data()[bucket]);
   }
 
   // Returns a 0/1 string representing the bitset.
@@ -659,7 +660,6 @@ class Bitset64 {
 
   template <class OtherIndexType>
   friend class Bitset64;
-  DISALLOW_COPY_AND_ASSIGN(Bitset64);
 };
 
 // Specialized version of Bitset64 that allows to query the last bit set more
@@ -669,6 +669,10 @@ class BitQueue64 {
   BitQueue64() : size_(), top_(-1), data_() {}
   explicit BitQueue64(int size)
       : size_(size), top_(-1), data_(BitLength64(size), 0) {}
+
+  // This type is neither copyable nor movable.
+  BitQueue64(const BitQueue64&) = delete;
+  BitQueue64& operator=(const BitQueue64&) = delete;
 
   void IncreaseSize(int size) {
     CHECK_GE(size, size_);
@@ -728,7 +732,6 @@ class BitQueue64 {
   int size_;
   int top_;
   std::vector<uint64_t> data_;
-  DISALLOW_COPY_AND_ASSIGN(BitQueue64);
 };
 
 // The specialization of Value() for IntType and int64_t.
@@ -755,6 +758,10 @@ class SparseBitset {
  public:
   SparseBitset() {}
   explicit SparseBitset(IntegerType size) : bitset_(size) {}
+
+  // This type is neither copyable nor movable.
+  SparseBitset(const SparseBitset&) = delete;
+  SparseBitset& operator=(const SparseBitset&) = delete;
   IntegerType size() const { return bitset_.size(); }
   void SparseClearAll() {
     for (const IntegerType i : to_clear_) bitset_.ClearBucket(i);
@@ -827,7 +834,6 @@ class SparseBitset {
  private:
   Bitset64<IntegerType> bitset_;
   std::vector<IntegerType> to_clear_;
-  DISALLOW_COPY_AND_ASSIGN(SparseBitset);
 };
 
 }  // namespace operations_research

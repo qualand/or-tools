@@ -13,6 +13,7 @@
 
 #include "ortools/glop/variables_info.h"
 
+#include <cstdlib>
 #include <utility>
 
 namespace operations_research {
@@ -385,7 +386,7 @@ void VariablesInfo::UpdateStatusForNewType(ColIndex col) {
 }
 
 void VariablesInfo::TransformToDualPhaseIProblem(
-    Fractional dual_feasibility_tolerance, const DenseRow& reduced_costs) {
+    Fractional dual_feasibility_tolerance, DenseRow::ConstView reduced_costs) {
   DCHECK(!in_dual_phase_one_);
   in_dual_phase_one_ = true;
   saved_lower_bounds_ = lower_bounds_;
@@ -436,7 +437,7 @@ void VariablesInfo::TransformToDualPhaseIProblem(
 }
 
 void VariablesInfo::EndDualPhaseI(Fractional dual_feasibility_tolerance,
-                                  const DenseRow& reduced_costs) {
+                                  DenseRow::ConstView reduced_costs) {
   DCHECK(in_dual_phase_one_);
   in_dual_phase_one_ = false;
   std::swap(saved_lower_bounds_, lower_bounds_);

@@ -49,8 +49,9 @@
 #include <string>
 #include <vector>
 
-#include "ortools/base/integral_types.h"
+#include "absl/strings/string_view.h"
 #include "ortools/base/macros.h"
+#include "ortools/base/types.h"
 #include "ortools/routing/simple_graph.h"
 
 namespace operations_research {
@@ -72,7 +73,7 @@ class SolomonParser {
   bool LoadFile(const std::string& file_name);
   // Loads instance from a file contained in a zipped archive; the archive can
   // contain multiple files.
-  bool LoadFile(const std::string& file_name, const std::string& archive_name);
+  bool LoadFile(absl::string_view file_name, const std::string& archive_name);
 
   // Returns the name of the instance being solved.
   const std::string& name() const { return name_; }

@@ -20,10 +20,10 @@
 #include <string>
 #include <vector>
 
+#include "absl/log/check.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_split.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/macros.h"
 #include "ortools/sat/boolean_problem.pb.h"
 #include "ortools/util/filelineiter.h"
 
@@ -35,7 +35,10 @@ namespace sat {
 //   http://www.cril.univ-artois.fr/PB12/format.pdf
 class OpbReader {
  public:
-  OpbReader() {}
+  OpbReader() = default;
+  // This type is neither copyable nor movable.
+  OpbReader(const OpbReader&) = delete;
+  OpbReader& operator=(const OpbReader&) = delete;
 
   // Loads the given opb filename into the given problem.
   bool Load(const std::string& filename, LinearBooleanProblem* problem) {
@@ -130,7 +133,6 @@ class OpbReader {
   }
 
   int num_variables_;
-  DISALLOW_COPY_AND_ASSIGN(OpbReader);
 };
 
 }  // namespace sat

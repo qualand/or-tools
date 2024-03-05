@@ -24,15 +24,15 @@ from ortools.linear_solver.python import model_builder
 def main():
     # [START model]
     # Create the model.
-    model = model_builder.ModelBuilder()
+    model = model_builder.Model()
     # [END model]
 
     # [START variables]
     # x and y are integer non-negative variables.
-    x = model.new_int_var(0.0, math.inf, 'x')
-    y = model.new_int_var(0.0, math.inf, 'y')
+    x = model.new_int_var(0.0, math.inf, "x")
+    y = model.new_int_var(0.0, math.inf, "y")
 
-    print('Number of variables =', model.num_variables)
+    print("Number of variables =", model.num_variables)
     # [END variables]
 
     # [START constraints]
@@ -42,7 +42,7 @@ def main():
     # x <= 3.5.
     model.add(x <= 3.5)
 
-    print('Number of constraints =', model.num_constraints)
+    print("Number of constraints =", model.num_constraints)
     # [END constraints]
 
     # [START objective]
@@ -52,26 +52,28 @@ def main():
 
     # [START solve]
     # Create the solver with the SCIP backend, and solve the model.
-    solver = model_builder.ModelSolver('scip')
+    solver = model_builder.Solver("scip")
+    if not solver.solver_is_supported():
+        return
     status = solver.solve(model)
     # [END solve]
 
     # [START print_solution]
     if status == model_builder.SolveStatus.OPTIMAL:
-        print('Solution:')
-        print('Objective value =', solver.objective_value)
-        print('x =', solver.value(x))
-        print('y =', solver.value(y))
+        print("Solution:")
+        print("Objective value =", solver.objective_value)
+        print("x =", solver.value(x))
+        print("y =", solver.value(y))
     else:
-        print('The problem does not have an optimal solution.')
+        print("The problem does not have an optimal solution.")
     # [END print_solution]
 
     # [START advanced]
-    print('\nAdvanced usage:')
-    print('Problem solved in %f seconds' % solver.wall_time)
+    print("\nAdvanced usage:")
+    print("Problem solved in %f seconds" % solver.wall_time)
     # [END advanced]
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
 # [END program]

@@ -16,6 +16,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <utility>
 
 #include "Eigen/Core"
 #include "Eigen/SparseCore"
@@ -89,12 +91,20 @@ class ShardedQuadraticProgram {
     qp_.constraint_upper_bounds.swap(constraint_upper_bounds);
   }
 
+  void SetConstraintBounds(int64_t constraint_index,
+                           std::optional<double> lower_bound,
+                           std::optional<double> upper_bound);
+
   // Swaps `objective` with the `objective_vector` in the quadratic program.
   // Swapping `objective_matrix` is not yet supported because it hasn't been
   // needed.
   void SwapObjectiveVector(Eigen::VectorXd& objective) {
     qp_.objective_vector.swap(objective);
   }
+
+  // Replaces constraint bounds whose absolute value is >= `threshold` with
+  // the corresponding infinity.
+  void ReplaceLargeConstraintBoundsWithInfinity(double threshold);
 
  private:
   QuadraticProgram qp_;

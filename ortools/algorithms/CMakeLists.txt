@@ -12,10 +12,7 @@
 # limitations under the License.
 
 file(GLOB _SRCS "*.h" "*.cc")
-list(REMOVE_ITEM _SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/hungarian_test.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/hungarian_test.h
-  )
+list(FILTER _SRCS EXCLUDE REGEX "/[^/]*_test\\.cc$")
 
 set(NAME ${PROJECT_NAME}_algorithms)
 
@@ -32,5 +29,5 @@ target_link_libraries(${NAME} PRIVATE
   absl::memory
   absl::str_format
   protobuf::libprotobuf
-  ${PROJECT_NAME}::proto)
-#add_library(${PROJECT_NAME}::algorithms ALIAS ${NAME})
+  ${PROJECT_NAMESPACE}::${PROJECT_NAME}_proto)
+#add_library(${PROJECT_NAMESPACE}::algorithms ALIAS ${NAME})

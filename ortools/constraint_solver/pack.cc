@@ -23,8 +23,8 @@
 
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
-#include "ortools/base/integral_types.h"
 #include "ortools/base/logging.h"
+#include "ortools/base/types.h"
 #include "ortools/constraint_solver/constraint_solver.h"
 #include "ortools/constraint_solver/constraint_solveri.h"
 
@@ -50,7 +50,7 @@ class Dimension : public BaseObject {
                                    const std::vector<int>& unassigned) = 0;
   virtual void EndPropagate() = 0;
   std::string DebugString() const override { return "Dimension"; }
-  virtual void Accept(ModelVisitor* const visitor) const = 0;
+  virtual void Accept(ModelVisitor* visitor) const = 0;
 
   Solver* solver() const { return solver_; }
 

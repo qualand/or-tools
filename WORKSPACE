@@ -16,59 +16,103 @@ workspace(name = "com_google_ortools")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository", "new_git_repository")
 
-# Bazel Skylib rules.
+# Bazel Extensions
+## Bazel Skylib rules.
 git_repository(
     name = "bazel_skylib",
-    tag = "1.4.1",
+    tag = "1.4.2",
     remote = "https://github.com/bazelbuild/bazel-skylib.git",
 )
 load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 bazel_skylib_workspace()
 
-# Bazel Platforms rules.
+## Bazel rules.
 git_repository(
     name = "platforms",
-    tag = "0.0.6",
+    tag = "0.0.7",
     remote = "https://github.com/bazelbuild/platforms.git",
 )
 
-# Abseil-cpp
+git_repository(
+    name = "rules_cc",
+    tag = "0.0.9",
+    remote = "https://github.com/bazelbuild/rules_cc.git",
+)
+
+git_repository(
+    name = "rules_proto",
+    tag = "5.3.0-21.7",
+    remote = "https://github.com/bazelbuild/rules_proto.git",
+)
+
+git_repository(
+    name = "rules_java",
+    tag = "6.4.0",
+    #tag = "6.5.1",
+    remote = "https://github.com/bazelbuild/rules_java.git",
+)
+
+git_repository(
+    name = "rules_jvm_external",
+    tag = "5.2",
+    #tag = "5.3",
+    remote = "https://github.com/bazelbuild/rules_jvm_external.git",
+)
+
+git_repository(
+    name = "contrib_rules_jvm",
+    tag = "v0.9.0",
+    #tag = "v0.19.0",
+    remote = "https://github.com/bazel-contrib/rules_jvm.git",
+)
+
+git_repository(
+    name = "rules_python",
+    tag = "0.26.0",
+    remote = "https://github.com/bazelbuild/rules_python.git",
+)
+
+# Dependencies
+## ZLIB
+new_git_repository(
+    name = "zlib",
+    build_file = "@com_google_protobuf//:third_party/zlib.BUILD",
+    tag = "v1.2.13",
+    remote = "https://github.com/madler/zlib.git",
+)
+
+## Re2
+git_repository(
+    name = "com_google_re2",
+    tag = "2023-11-01",
+    remote = "https://github.com/google/re2.git",
+)
+
+## Abseil-cpp
 git_repository(
     name = "com_google_absl",
-    tag = "20230125.0",
+    tag = "20230802.1",
+    patches = ["//patches:abseil-cpp-20230802.1.patch"],
+    patch_args = ["-p1"],
     remote = "https://github.com/abseil/abseil-cpp.git",
 )
 
-# Protobuf
+## Protobuf
+# proto_library, cc_proto_library, and java_proto_library rules implicitly
+# depend on @com_google_protobuf for protoc and proto runtimes.
+# This statement defines the @com_google_protobuf repo.
 git_repository(
     name = "com_google_protobuf",
-    tag = "v21.12",
+    tag = "v25.0",
+    patches = ["//patches:protobuf-v25.0.patch"],
+    patch_args = ["-p1"],
     remote = "https://github.com/protocolbuffers/protobuf.git",
 )
 # Load common dependencies.
 load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
 protobuf_deps()
 
-# ZLIB
-new_git_repository(
-    name = "zlib",
-    build_file = "@com_google_protobuf//:third_party/zlib.BUILD",
-    tag = "v1.2.11",
-    remote = "https://github.com/madler/zlib.git",
-)
-
-git_repository(
-    name = "com_google_re2",
-    tag = "2022-04-01",
-    remote = "https://github.com/google/re2.git",
-)
-
-git_repository(
-    name = "com_google_googletest",
-    tag = "release-1.12.1",
-    remote = "https://github.com/google/googletest.git",
-)
-
+## Solvers
 http_archive(
     name = "glpk",
     build_file = "//bazel:glpk.BUILD",
@@ -90,7 +134,7 @@ new_git_repository(
     build_file = "//bazel:scip.BUILD",
     patches = ["//bazel:scip.patch"],
     patch_args = ["-p1"],
-    tag = "v803",
+    tag = "v804",
     remote = "https://github.com/scipopt/scip.git",
 )
 
@@ -106,6 +150,7 @@ cc_library(
     srcs = [],
     includes = ['.'],
     hdrs = glob(['Eigen/**']),
+    defines = ["EIGEN_MPL2_ONLY",],
     visibility = ['//visibility:public'],
 )
 """
@@ -117,8 +162,7 @@ git_repository(
     remote = "https://github.com/ERGO-Code/HiGHS.git",
 )
 
-# Swig support
-
+## Swig support
 # pcre source code repository
 new_git_repository(
     name = "pcre2",
@@ -147,25 +191,21 @@ new_git_repository(
     remote = "https://github.com/swig/swig.git",
 )
 
-# Python
-## Bazel Python rules.
-git_repository(
-    name = "rules_python",
-    tag = "0.16.2",
-    remote = "https://github.com/bazelbuild/rules_python.git",
-)
+## Python
+load("@rules_python//python:repositories.bzl", "py_repositories")
+py_repositories()
 
-# Create a central external repo, @ortools_deps, that contains Bazel targets for all the
-# third-party packages specified in the python_deps.txt file.
+# Create a central external repo, @pip_deps, that contains Bazel targets for all the
+# third-party packages specified in the bazel/requirements.txt file.
 load("@rules_python//python:pip.bzl", "pip_parse")
-
 pip_parse(
-   name = "ortools_deps",
+   name = "pip_deps",
    requirements = "//bazel:ortools_requirements.txt",
 )
 
-load("@ortools_deps//:requirements.bzl", "install_deps")
-install_deps()
+load("@pip_deps//:requirements.bzl",
+     install_pip_deps="install_deps")
+install_pip_deps()
 
 # Add a second repo @ortools_notebook_deps for jupyter notebooks.
 pip_parse(
@@ -179,7 +219,7 @@ install_notebook_deps()
 
 git_repository(
     name = "pybind11_bazel",
-    commit = "fc56ce8a8b51e3dd941139d329b63ccfea1d304b",
+    commit = "23926b00e2b2eb2fc46b17e587cf0c0cfd2f2c4b", # 2023/11/29
     patches = ["//patches:pybind11_bazel.patch"],
     patch_args = ["-p1"],
     remote = "https://github.com/pybind/pybind11_bazel.git",
@@ -188,20 +228,27 @@ git_repository(
 new_git_repository(
     name = "pybind11",
     build_file = "@pybind11_bazel//:pybind11.BUILD",
-    tag = "v2.10.3",
+    tag = "v2.11.1",
     remote = "https://github.com/pybind/pybind11.git",
+)
+
+new_git_repository(
+    name = "pybind11_protobuf",
+    commit = "b713501f1da56d9b76c42f89efd00b97c26c9eac", # 2023/11/29
+    remote = "https://github.com/pybind/pybind11_protobuf.git",
 )
 
 load("@pybind11_bazel//:python_configure.bzl", "python_configure")
 python_configure(name = "local_config_python", python_version = "3")
-
-# Java support (with junit 5)
-## Bazel Java rules.
-git_repository(
-    name = "rules_jvm_external",
-    tag = "4.5",
-    remote = "https://github.com/bazelbuild/rules_jvm_external.git",
+bind(
+    name = "python_headers",
+    actual = "@local_config_python//:python_headers",
 )
+
+## Java support (with junit 5)
+load("@rules_java//java:repositories.bzl", "rules_java_dependencies", "rules_java_toolchains")
+rules_java_dependencies()
+rules_java_toolchains()
 
 load("@rules_jvm_external//:repositories.bzl", "rules_jvm_external_deps")
 rules_jvm_external_deps()
@@ -214,7 +261,7 @@ JUNIT_JUPITER_VERSION = "5.9.2"
 load("@rules_jvm_external//:defs.bzl", "maven_install")
 maven_install(
     artifacts = [
-        "net.java.dev.jna:jna:aar:5.12.1",
+        "net.java.dev.jna:jna:aar:5.13.0",
         "com.google.truth:truth:0.32",
         "org.junit.platform:junit-platform-launcher:%s" % JUNIT_PLATFORM_VERSION,
         "org.junit.platform:junit-platform-reporting:%s" % JUNIT_PLATFORM_VERSION,
@@ -227,15 +274,21 @@ maven_install(
     ],
 )
 
-git_repository(
-    name = "contrib_rules_jvm",
-    tag = "v0.9.0",
-    remote = "https://github.com/bazel-contrib/rules_jvm.git",
-)
-
 load("@contrib_rules_jvm//:repositories.bzl", "contrib_rules_jvm_deps")
 contrib_rules_jvm_deps()
 
 load("@contrib_rules_jvm//:setup.bzl", "contrib_rules_jvm_setup")
 contrib_rules_jvm_setup()
 
+## Testing
+git_repository(
+    name = "com_google_googletest",
+    tag = "v1.13.0",
+    remote = "https://github.com/google/googletest.git",
+)
+
+git_repository(
+    name = "com_google_benchmark",
+    tag = "v1.8.1",
+    remote = "https://github.com/google/benchmark.git",
+)

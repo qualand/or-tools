@@ -1,36 +1,8 @@
-| [home](README.md) | [boolean logic](boolean_logic.md) | [integer arithmetic](integer_arithmetic.md) | [channeling constraints](channeling.md) | [scheduling](scheduling.md) | [Using the CP-SAT solver](solver.md) | [Model manipulation](model.md) | [Python API](https://google.github.io/or-tools/python/ortools/sat/python/cp_model.html) |
-| ----------------- | --------------------------------- | ------------------------------------------- | --------------------------------------- | --------------------------- | ------------------------------------ | ------------------------------ | -------------------------------- |
-
+[home](README.md) | [boolean logic](boolean_logic.md) | [integer arithmetic](integer_arithmetic.md) | [channeling constraints](channeling.md) | [scheduling](scheduling.md) | [Using the CP-SAT solver](solver.md) | [Model manipulation](model.md) | [Troubleshooting](troubleshooting.md) | [Python API](https://google.github.io/or-tools/python/ortools/sat/python/cp_model.html)
+----------------- | --------------------------------- | ------------------------------------------- | --------------------------------------- | --------------------------- | ------------------------------------ | ------------------------------ | ------------------------------------- | ---------------------------------------------------------------------------------------
 # Solving a CP-SAT model
 
 https://developers.google.com/optimization/
-
-<!--ts-->
-* [Solving a CP-SAT model](#solving-a-cp-sat-model)
-   * [Changing the parameters of the solver](#changing-the-parameters-of-the-solver)
-      * [Specifying the time limit in Python](#specifying-the-time-limit-in-python)
-      * [Specifying the time limit in C++](#specifying-the-time-limit-in-c)
-      * [Specifying the time limit in Java](#specifying-the-time-limit-in-java)
-      * [Specifying the time limit in C#.](#specifying-the-time-limit-in-c-1)
-   * [Printing intermediate solutions](#printing-intermediate-solutions)
-      * [Python code](#python-code)
-      * [C++ code](#c-code)
-      * [Java code](#java-code)
-      * [C# code](#c-code-1)
-   * [Searching for all solutions in a satisfiability model](#searching-for-all-solutions-in-a-satisfiability-model)
-      * [Python code](#python-code-1)
-      * [C++ code](#c-code-2)
-      * [Java code](#java-code-1)
-      * [C# code](#c-code-3)
-   * [Stopping search early](#stopping-search-early)
-      * [Python code](#python-code-2)
-      * [C++ code](#c-code-4)
-      * [Java code](#java-code-2)
-      * [C# code](#c-code-5)
-
-<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
-
-<!--te-->
 
 ## Changing the parameters of the solver
 
@@ -52,9 +24,9 @@ def SolveWithTimeLimitSampleSat():
     model = cp_model.CpModel()
     # Creates the variables.
     num_vals = 3
-    x = model.NewIntVar(0, num_vals - 1, 'x')
-    y = model.NewIntVar(0, num_vals - 1, 'y')
-    z = model.NewIntVar(0, num_vals - 1, 'z')
+    x = model.NewIntVar(0, num_vals - 1, "x")
+    y = model.NewIntVar(0, num_vals - 1, "y")
+    z = model.NewIntVar(0, num_vals - 1, "z")
     # Adds an all-different constraint.
     model.Add(x != y)
 
@@ -67,9 +39,9 @@ def SolveWithTimeLimitSampleSat():
     status = solver.Solve(model)
 
     if status == cp_model.OPTIMAL:
-        print('x = %i' % solver.Value(x))
-        print('y = %i' % solver.Value(y))
-        print('z = %i' % solver.Value(z))
+        print(f"x = {solver.Value(x)}")
+        print(f"y = {solver.Value(y)}")
+        print(f"z = {solver.Value(z)}")
 
 
 SolveWithTimeLimitSampleSat()
@@ -215,8 +187,10 @@ public class SolveWithTimeLimitSampleSat
 
 ## Printing intermediate solutions
 
-In an optimization model, you can print intermediate solutions. You need to
-register a callback on the solver that will be called at each solution.
+In an optimization model, you can print intermediate solutions. For all
+languages except Go, you need to register a callback on the solver that will be
+called at each solution. For Go, callbacks are not implemented, but you can
+still get the intermediate solutions in the response.
 
 The exact implementation depends on the target language.
 
@@ -224,6 +198,7 @@ The exact implementation depends on the target language.
 
 ```python
 #!/usr/bin/env python3
+"""Solves an optimization problem and displays all intermediate solutions."""
 
 from ortools.sat.python import cp_model
 
@@ -238,10 +213,10 @@ class VarArrayAndObjectiveSolutionPrinter(cp_model.CpSolverSolutionCallback):
         self.__solution_count = 0
 
     def on_solution_callback(self):
-        print('Solution %i' % self.__solution_count)
-        print('  objective value = %i' % self.ObjectiveValue())
+        print(f"Solution {self.__solution_count}")
+        print(f"  objective value = {self.ObjectiveValue()}")
         for v in self.__variables:
-            print('  %s = %i' % (v, self.Value(v)), end=' ')
+            print(f"  {v}={self.Value(v)}", end=" ")
         print()
         self.__solution_count += 1
 
@@ -256,9 +231,9 @@ def SolveAndPrintIntermediateSolutionsSampleSat():
 
     # Creates the variables.
     num_vals = 3
-    x = model.NewIntVar(0, num_vals - 1, 'x')
-    y = model.NewIntVar(0, num_vals - 1, 'y')
-    z = model.NewIntVar(0, num_vals - 1, 'z')
+    x = model.NewIntVar(0, num_vals - 1, "x")
+    y = model.NewIntVar(0, num_vals - 1, "y")
+    z = model.NewIntVar(0, num_vals - 1, "z")
 
     # Creates the constraints.
     model.Add(x != y)
@@ -270,8 +245,8 @@ def SolveAndPrintIntermediateSolutionsSampleSat():
     solution_printer = VarArrayAndObjectiveSolutionPrinter([x, y, z])
     status = solver.Solve(model, solution_printer)
 
-    print('Status = %s' % solver.StatusName(status))
-    print('Number of solutions found: %i' % solution_printer.solution_count())
+    print(f"Status = {solver.StatusName(status)}")
+    print(f"Number of solutions found: {solution_printer.solution_count()}")
 
 
 SolveAndPrintIntermediateSolutionsSampleSat()
@@ -461,8 +436,10 @@ public class SolveAndPrintIntermediateSolutionsSampleSat
 
 ## Searching for all solutions in a satisfiability model
 
-In an non-optimization model, you can search for all solutions. You need to
-register a callback on the solver that will be called at each solution.
+In an non-optimization model, you can search for all solutions. For all
+languages except Go, you need to register a callback on the solver that will be
+called at each solution. For Go, callbacks are not implemented, but you can
+still get the intermediate solutions in the response.
 
 Please note that it does not work in parallel
 (i. e. parameter `num_search_workers` > 1).
@@ -484,6 +461,7 @@ parameter.
 
 ```python
 #!/usr/bin/env python3
+"""Code sample that solves a model and displays all solutions."""
 
 from ortools.sat.python import cp_model
 
@@ -499,7 +477,7 @@ class VarArraySolutionPrinter(cp_model.CpSolverSolutionCallback):
     def on_solution_callback(self):
         self.__solution_count += 1
         for v in self.__variables:
-            print('%s=%i' % (v, self.Value(v)), end=' ')
+            print(f"{v}={self.Value(v)}", end=" ")
         print()
 
     def solution_count(self):
@@ -513,9 +491,9 @@ def SearchForAllSolutionsSampleSat():
 
     # Creates the variables.
     num_vals = 3
-    x = model.NewIntVar(0, num_vals - 1, 'x')
-    y = model.NewIntVar(0, num_vals - 1, 'y')
-    z = model.NewIntVar(0, num_vals - 1, 'z')
+    x = model.NewIntVar(0, num_vals - 1, "x")
+    y = model.NewIntVar(0, num_vals - 1, "y")
+    z = model.NewIntVar(0, num_vals - 1, "z")
 
     # Create the constraints.
     model.Add(x != y)
@@ -528,8 +506,8 @@ def SearchForAllSolutionsSampleSat():
     # Solve.
     status = solver.Solve(model, solution_printer)
 
-    print('Status = %s' % solver.StatusName(status))
-    print('Number of solutions found: %i' % solution_printer.solution_count())
+    print(f"Status = {solver.StatusName(status)}")
+    print(f"Number of solutions found: {solution_printer.solution_count()}")
 
 
 SearchForAllSolutionsSampleSat()
@@ -756,10 +734,10 @@ class VarArraySolutionPrinterWithLimit(cp_model.CpSolverSolutionCallback):
     def on_solution_callback(self):
         self.__solution_count += 1
         for v in self.__variables:
-            print('%s=%i' % (v, self.Value(v)), end=' ')
+            print(f"{v}={self.Value(v)}", end=" ")
         print()
         if self.__solution_count >= self.__solution_limit:
-            print('Stop search after %i solutions' % self.__solution_limit)
+            print(f"Stop search after {self.__solution_limit} solutions")
             self.StopSearch()
 
     def solution_count(self):
@@ -772,9 +750,9 @@ def StopAfterNSolutionsSampleSat():
     model = cp_model.CpModel()
     # Creates the variables.
     num_vals = 3
-    x = model.NewIntVar(0, num_vals - 1, 'x')
-    y = model.NewIntVar(0, num_vals - 1, 'y')
-    z = model.NewIntVar(0, num_vals - 1, 'z')
+    x = model.NewIntVar(0, num_vals - 1, "x")
+    y = model.NewIntVar(0, num_vals - 1, "y")
+    z = model.NewIntVar(0, num_vals - 1, "z")
 
     # Create a solver and solve.
     solver = cp_model.CpSolver()
@@ -783,8 +761,8 @@ def StopAfterNSolutionsSampleSat():
     solver.parameters.enumerate_all_solutions = True
     # Solve.
     status = solver.Solve(model, solution_printer)
-    print('Status = %s' % solver.StatusName(status))
-    print('Number of solutions found: %i' % solution_printer.solution_count())
+    print(f"Status = {solver.StatusName(status)}")
+    print(f"Number of solutions found: {solution_printer.solution_count()}")
     assert solution_printer.solution_count() == 5
 
 

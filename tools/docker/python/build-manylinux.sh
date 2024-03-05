@@ -35,7 +35,7 @@ DESCRIPTION
 
 \tYou MUST define the following variables before running this script:
 \t* PLATFORM: x86_64 aarch64
-\t* PYTHON_VERSION: 3 36 37 38 39 310
+\t* PYTHON_VERSION: 3 38 39 310 311 312
 note: PYTHON_VERSION=3 will generate for all pythons which could take time...
 
 OPTIONS
@@ -87,7 +87,7 @@ function build_wheel() {
   # shellcheck source=/dev/null
   source "${VENV_DIR}/bin/activate"
   pip install -U pip setuptools wheel absl-py  # absl-py is needed by make test_python
-  pip install -U mypy-protobuf  # need to generate protobuf mypy files
+  pip install -U mypy mypy-protobuf  # need to generate protobuf mypy files
 
   echo "current dir: $(pwd)"
 

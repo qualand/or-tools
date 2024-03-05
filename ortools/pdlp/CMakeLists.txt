@@ -16,9 +16,9 @@ if(NOT USE_PDLP)
 endif()
 
 file(GLOB _SRCS "*.h" "*.cc")
-list(FILTER _SRCS EXCLUDE REGEX ".*/.*_test.cc")
-list(FILTER _SRCS EXCLUDE REGEX ".*/gtest.*")
-list(FILTER _SRCS EXCLUDE REGEX ".*/test.*")
+list(FILTER _SRCS EXCLUDE REGEX "/[^/]*_test\\.cc$")
+list(FILTER _SRCS EXCLUDE REGEX "/gtest[^/]*$")
+list(FILTER _SRCS EXCLUDE REGEX "/test[^/]*$")
 
 set(NAME ${PROJECT_NAME}_pdlp)
 
@@ -35,7 +35,6 @@ target_link_libraries(${NAME} PRIVATE
   absl::memory
   absl::strings
   absl::str_format
-  protobuf::libprotobuf
   Eigen3::Eigen
-  ${PROJECT_NAME}::proto)
-#add_library(${PROJECT_NAME}::pdlp ALIAS ${NAME})
+  ${PROJECT_NAMESPACE}::${PROJECT_NAME}_proto)
+#add_library(${PROJECT_NAMESPACE}::pdlp ALIAS ${NAME})

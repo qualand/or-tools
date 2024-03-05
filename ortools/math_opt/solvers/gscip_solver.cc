@@ -26,6 +26,8 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
+#include "absl/log/die_if_null.h"
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -35,14 +37,10 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-#include "google/protobuf/map.h"
-#include "absl/log/check.h"
 #include "ortools/base/cleanup.h"
-#include "absl/log/die_if_null.h"
 #include "ortools/base/logging.h"
 #include "ortools/base/map_util.h"
 #include "ortools/base/protoutil.h"
-#include "ortools/base/status_builder.h"
 #include "ortools/base/status_macros.h"
 #include "ortools/gscip/gscip.h"
 #include "ortools/gscip/gscip.pb.h"
@@ -56,6 +54,7 @@
 #include "ortools/math_opt/core/solver_interface.h"
 #include "ortools/math_opt/core/sparse_submatrix.h"
 #include "ortools/math_opt/core/sparse_vector_view.h"
+#include "ortools/math_opt/infeasible_subsystem.pb.h"
 #include "ortools/math_opt/model.pb.h"
 #include "ortools/math_opt/model_parameters.pb.h"
 #include "ortools/math_opt/model_update.pb.h"
@@ -63,11 +62,10 @@
 #include "ortools/math_opt/result.pb.h"
 #include "ortools/math_opt/solution.pb.h"
 #include "ortools/math_opt/solvers/gscip_solver_callback.h"
-#include "ortools/math_opt/solvers/gscip_solver_message_callback_handler.h"
+#include "ortools/math_opt/solvers/message_callback_data.h"
 #include "ortools/math_opt/sparse_containers.pb.h"
 #include "ortools/math_opt/validators/callback_validator.h"
 #include "ortools/port/proto_utils.h"
-#include "scip/scip.h"
 #include "scip/type_cons.h"
 #include "scip/type_event.h"
 #include "scip/type_var.h"
@@ -595,12 +593,15 @@ absl::StatusOr<std::pair<GScipSOSData, GScipSolver::AuxiliaryStructureHandler>>
 GScipSolver::ProcessSosProto(const SosConstraintProto& sos_constraint) {
   GScipSOSData data;
   AuxiliaryStructureHandler handler;
+  absl::flat_hash_set<int64_t> reused_variables;
   for (const LinearExpressionProto& expr : sos_constraint.expressions()) {
     // If the expression is equivalent to 1 * some_variable, there is no need to
-    // add a slack variable.
+    // add a slack variable. But, SCIP crashes in debug mode if you repeat a
+    // variable twice within an SOS constraint, so we track the ones we reuse.
     if (expr.ids_size() == 1 && expr.coefficients(0) == 1.0 &&
-        expr.offset() == 0.0) {
+        expr.offset() == 0.0 && !reused_variables.contains(expr.ids(0))) {
       data.variables.push_back(variables_.at(expr.ids(0)));
+      reused_variables.insert(expr.ids(0));
     } else {
       ASSIGN_OR_RETURN((const auto [slack_var, slack_constr]),
                        AddSlackVariableEqualToExpression(expr));
@@ -681,41 +682,47 @@ absl::StatusOr<GScipParameters> GScipSolver::MergeParameters(
         util_time::DecodeGoogleApiProto(solve_parameters.time_limit()).value(),
         &result);
   }
-
-  if (solve_parameters.has_threads()) {
-    GScipSetMaxNumThreads(solve_parameters.threads(), &result);
-  }
-
-  if (solve_parameters.has_relative_gap_tolerance()) {
-    (*result.mutable_real_params())["limits/gap"] =
-        solve_parameters.relative_gap_tolerance();
-  }
-
-  if (solve_parameters.has_absolute_gap_tolerance()) {
-    (*result.mutable_real_params())["limits/absgap"] =
-        solve_parameters.absolute_gap_tolerance();
+  if (solve_parameters.has_iteration_limit()) {
+    warnings.push_back("parameter iteration_limit not supported for gSCIP.");
   }
   if (solve_parameters.has_node_limit()) {
     (*result.mutable_long_params())["limits/totalnodes"] =
         solve_parameters.node_limit();
   }
-
+  if (solve_parameters.has_cutoff_limit()) {
+    result.set_objective_limit(solve_parameters.cutoff_limit());
+  }
   if (solve_parameters.has_objective_limit()) {
     warnings.push_back("parameter objective_limit not supported for gSCIP.");
   }
   if (solve_parameters.has_best_bound_limit()) {
     warnings.push_back("parameter best_bound_limit not supported for gSCIP.");
   }
-
-  if (solve_parameters.has_cutoff_limit()) {
-    result.set_objective_limit(solve_parameters.cutoff_limit());
-  }
-
   if (solve_parameters.has_solution_limit()) {
     (*result.mutable_int_params())["limits/solutions"] =
         solve_parameters.solution_limit();
   }
-
+  // GScip has also GScipSetOutputEnabled() but this changes the log
+  // level. Setting `silence_output` sets the `quiet` field on the default
+  // message handler of SCIP which removes the output. Here it is important to
+  // use this rather than changing the log level so that if the user provides
+  // a MessageCallback function they do get some messages even when
+  // `enable_output` is false.
+  result.set_silence_output(!solve_parameters.enable_output());
+  if (solve_parameters.has_threads()) {
+    GScipSetMaxNumThreads(solve_parameters.threads(), &result);
+  }
+  if (solve_parameters.has_random_seed()) {
+    GScipSetRandomSeed(&result, solve_parameters.random_seed());
+  }
+  if (solve_parameters.has_absolute_gap_tolerance()) {
+    (*result.mutable_real_params())["limits/absgap"] =
+        solve_parameters.absolute_gap_tolerance();
+  }
+  if (solve_parameters.has_relative_gap_tolerance()) {
+    (*result.mutable_real_params())["limits/gap"] =
+        solve_parameters.relative_gap_tolerance();
+  }
   if (solve_parameters.has_solution_pool_size()) {
     result.set_num_solutions(solve_parameters.solution_pool_size());
     // We must set limits/maxsol (the internal solution pool) and
@@ -729,20 +736,8 @@ absl::StatusOr<GScipParameters> GScipSolver::MergeParameters(
         solve_parameters.solution_pool_size();
   }
 
-  // GScip has also GScipSetOutputEnabled() but this changes the log
-  // level. Setting `silence_output` sets the `quiet` field on the default
-  // message handler of SCIP which removes the output. Here it is important to
-  // use this rather than changing the log level so that if the user registers
-  // for CALLBACK_EVENT_MESSAGE they do get some messages even when
-  // `enable_output` is false.
-  result.set_silence_output(!solve_parameters.enable_output());
-
-  if (solve_parameters.has_random_seed()) {
-    GScipSetRandomSeed(&result, solve_parameters.random_seed());
-  }
-
   if (solve_parameters.lp_algorithm() != LP_ALGORITHM_UNSPECIFIED) {
-    char alg;
+    char alg = 's';
     switch (solve_parameters.lp_algorithm()) {
       case LP_ALGORITHM_PRIMAL_SIMPLEX:
         alg = 'p';
@@ -751,7 +746,16 @@ absl::StatusOr<GScipParameters> GScipSolver::MergeParameters(
         alg = 'd';
         break;
       case LP_ALGORITHM_BARRIER:
+        // As SCIP is configured in ortools, this is an error, since we are not
+        // connected to any LP solver that runs barrier.
+        warnings.push_back(
+            "parameter lp_algorithm with value BARRIER is not supported for "
+            "gSCIP in ortools.");
         alg = 'c';
+        break;
+      case LP_ALGORITHM_FIRST_ORDER:
+        warnings.push_back(
+            "parameter lp_algorithm with value FIRST_ORDER is not supported.");
         break;
       default:
         LOG(FATAL) << "LPAlgorithm: "
@@ -760,16 +764,15 @@ absl::StatusOr<GScipParameters> GScipSolver::MergeParameters(
     }
     (*result.mutable_char_params())["lp/initalgorithm"] = alg;
   }
-
+  if (solve_parameters.presolve() != EMPHASIS_UNSPECIFIED) {
+    result.set_presolve(ConvertMathOptEmphasis(solve_parameters.presolve()));
+  }
   if (solve_parameters.cuts() != EMPHASIS_UNSPECIFIED) {
     result.set_separating(ConvertMathOptEmphasis(solve_parameters.cuts()));
   }
   if (solve_parameters.heuristics() != EMPHASIS_UNSPECIFIED) {
     result.set_heuristics(
         ConvertMathOptEmphasis(solve_parameters.heuristics()));
-  }
-  if (solve_parameters.presolve() != EMPHASIS_UNSPECIFIED) {
-    result.set_presolve(ConvertMathOptEmphasis(solve_parameters.presolve()));
   }
   if (solve_parameters.scaling() != EMPHASIS_UNSPECIFIED) {
     int scaling_value;
@@ -803,141 +806,127 @@ absl::StatusOr<GScipParameters> GScipSolver::MergeParameters(
 
 namespace {
 
-std::string JoinDetails(const std::string& gscip_detail,
-                        const std::string& math_opt_detail) {
+std::string JoinDetails(absl::string_view gscip_detail,
+                        absl::string_view math_opt_detail) {
   if (gscip_detail.empty()) {
-    return math_opt_detail;
+    return std::string(math_opt_detail);
   }
   if (math_opt_detail.empty()) {
-    return gscip_detail;
+    return std::string(gscip_detail);
   }
   return absl::StrCat(gscip_detail, "; ", math_opt_detail);
 }
 
-ProblemStatusProto GetProblemStatusProto(const GScipOutput::Status gscip_status,
-                                         const bool has_feasible_solution,
-                                         const bool has_finite_dual_bound,
-                                         const bool was_cutoff) {
-  ProblemStatusProto problem_status;
-  if (has_feasible_solution) {
-    problem_status.set_primal_status(FEASIBILITY_STATUS_FEASIBLE);
-  } else {
-    problem_status.set_primal_status(FEASIBILITY_STATUS_UNDETERMINED);
-  }
-  problem_status.set_dual_status(FEASIBILITY_STATUS_UNDETERMINED);
-
-  switch (gscip_status) {
-    case GScipOutput::OPTIMAL:
-      problem_status.set_dual_status(FEASIBILITY_STATUS_FEASIBLE);
-      break;
-    case GScipOutput::INFEASIBLE:
-      if (!was_cutoff) {
-        problem_status.set_primal_status(FEASIBILITY_STATUS_INFEASIBLE);
-      }
-      break;
-    case GScipOutput::UNBOUNDED:
-      problem_status.set_dual_status(FEASIBILITY_STATUS_INFEASIBLE);
-      break;
-    case GScipOutput::INF_OR_UNBD:
-      problem_status.set_primal_or_dual_infeasible(true);
-      break;
-    default:
-      break;
-  }
-  if (has_finite_dual_bound) {
-    problem_status.set_dual_status(FEASIBILITY_STATUS_FEASIBLE);
-  }
-  return problem_status;
-}
-
 absl::StatusOr<TerminationProto> ConvertTerminationReason(
-    const GScipOutput::Status gscip_status,
-    const std::string& gscip_status_detail, const bool has_feasible_solution,
-    const bool had_cutoff) {
+    const bool is_maximize, const GScipOutput::Status gscip_status,
+    absl::string_view gscip_status_detail, const GScipSolvingStats& gscip_stats,
+    const bool has_feasible_solution, const bool had_cutoff) {
+  const std::optional<double> optional_finite_primal_objective =
+      has_feasible_solution ? std::make_optional(gscip_stats.best_objective())
+                            : std::nullopt;
+  // For SCIP, the only indicator for the existence of a dual feasible solution
+  // is a finite dual bound.
+  const std::optional<double> optional_dual_objective =
+      std::isfinite(gscip_stats.best_bound())
+          ? std::make_optional(gscip_stats.best_bound())
+          : std::nullopt;
   switch (gscip_status) {
     case GScipOutput::USER_INTERRUPT:
-      return TerminateForLimit(
-          LIMIT_INTERRUPTED, /*feasible=*/has_feasible_solution,
+      return LimitTerminationProto(
+          is_maximize, LIMIT_INTERRUPTED, optional_finite_primal_objective,
+          optional_dual_objective,
           JoinDetails(gscip_status_detail,
                       "underlying gSCIP status: USER_INTERRUPT"));
     case GScipOutput::NODE_LIMIT:
-      return TerminateForLimit(
-          LIMIT_NODE, /*feasible=*/has_feasible_solution,
+      return LimitTerminationProto(
+          is_maximize, LIMIT_NODE, optional_finite_primal_objective,
+          optional_dual_objective,
           JoinDetails(gscip_status_detail,
                       "underlying gSCIP status: NODE_LIMIT"));
     case GScipOutput::TOTAL_NODE_LIMIT:
-      return TerminateForLimit(
-          LIMIT_NODE, /*feasible=*/has_feasible_solution,
+      return LimitTerminationProto(
+          is_maximize, LIMIT_NODE, optional_finite_primal_objective,
+          optional_dual_objective,
           JoinDetails(gscip_status_detail,
                       "underlying gSCIP status: TOTAL_NODE_LIMIT"));
     case GScipOutput::STALL_NODE_LIMIT:
-      return TerminateForLimit(LIMIT_SLOW_PROGRESS,
-                               /*feasible=*/has_feasible_solution,
-                               gscip_status_detail);
+      return LimitTerminationProto(
+          is_maximize, LIMIT_SLOW_PROGRESS, optional_finite_primal_objective,
+          optional_dual_objective, gscip_status_detail);
     case GScipOutput::TIME_LIMIT:
-      return TerminateForLimit(LIMIT_TIME, /*feasible=*/has_feasible_solution,
-                               gscip_status_detail);
+      return LimitTerminationProto(
+          is_maximize, LIMIT_TIME, optional_finite_primal_objective,
+          optional_dual_objective, gscip_status_detail);
     case GScipOutput::MEM_LIMIT:
-      return TerminateForLimit(LIMIT_MEMORY, /*feasible=*/has_feasible_solution,
-                               gscip_status_detail);
+      return LimitTerminationProto(
+          is_maximize, LIMIT_MEMORY, optional_finite_primal_objective,
+          optional_dual_objective, gscip_status_detail);
     case GScipOutput::SOL_LIMIT:
-      return TerminateForLimit(
-          LIMIT_SOLUTION, /*feasible=*/has_feasible_solution,
+      return LimitTerminationProto(
+          is_maximize, LIMIT_SOLUTION, optional_finite_primal_objective,
+          optional_dual_objective,
           JoinDetails(gscip_status_detail,
                       "underlying gSCIP status: SOL_LIMIT"));
     case GScipOutput::BEST_SOL_LIMIT:
-      return TerminateForLimit(
-          LIMIT_SOLUTION, /*feasible=*/has_feasible_solution,
+      return LimitTerminationProto(
+          is_maximize, LIMIT_SOLUTION, optional_finite_primal_objective,
+          optional_dual_objective,
           JoinDetails(gscip_status_detail,
                       "underlying gSCIP status: BEST_SOL_LIMIT"));
     case GScipOutput::RESTART_LIMIT:
-      return TerminateForLimit(
-          LIMIT_OTHER, /*feasible=*/has_feasible_solution,
+      return LimitTerminationProto(
+          is_maximize, LIMIT_OTHER, optional_finite_primal_objective,
+          optional_dual_objective,
           JoinDetails(gscip_status_detail,
                       "underlying gSCIP status: RESTART_LIMIT"));
     case GScipOutput::OPTIMAL:
-      return TerminateForReason(
-          TERMINATION_REASON_OPTIMAL,
+      return OptimalTerminationProto(
+          /*finite_primal_objective=*/gscip_stats.best_objective(),
+          /*dual_objective=*/gscip_stats.best_bound(),
           JoinDetails(gscip_status_detail, "underlying gSCIP status: OPTIMAL"));
     case GScipOutput::GAP_LIMIT:
-      return TerminateForReason(
-          TERMINATION_REASON_OPTIMAL,
+      return OptimalTerminationProto(
+          /*finite_primal_objective=*/gscip_stats.best_objective(),
+          /*dual_objective=*/gscip_stats.best_bound(),
           JoinDetails(gscip_status_detail,
                       "underlying gSCIP status: GAP_LIMIT"));
     case GScipOutput::INFEASIBLE:
       if (had_cutoff) {
-        return TerminateForLimit(LIMIT_CUTOFF,
-                                 /*feasible=*/false, gscip_status_detail);
+        return CutoffTerminationProto(is_maximize, gscip_status_detail);
       } else {
-        return TerminateForReason(TERMINATION_REASON_INFEASIBLE,
-                                  gscip_status_detail);
+        // By convention infeasible MIPs are always dual feasible.
+        const FeasibilityStatusProto dual_feasibility_status =
+            FEASIBILITY_STATUS_FEASIBLE;
+        return InfeasibleTerminationProto(is_maximize, dual_feasibility_status,
+                                          gscip_status_detail);
       }
     case GScipOutput::UNBOUNDED: {
       if (has_feasible_solution) {
-        return TerminateForReason(
-            TERMINATION_REASON_UNBOUNDED,
+        return UnboundedTerminationProto(
+            is_maximize,
             JoinDetails(gscip_status_detail,
                         "underlying gSCIP status was UNBOUNDED, both primal "
                         "ray and feasible solution are present"));
       } else {
-        return TerminateForReason(
-            TERMINATION_REASON_INFEASIBLE_OR_UNBOUNDED,
+        return InfeasibleOrUnboundedTerminationProto(
+            is_maximize,
+            /*dual_feasibility_status=*/FEASIBILITY_STATUS_INFEASIBLE,
             JoinDetails(
                 gscip_status_detail,
                 "underlying gSCIP status was UNBOUNDED, but only primal ray "
                 "was given, no feasible solution was found"));
       }
     }
-
     case GScipOutput::INF_OR_UNBD:
-      return TerminateForReason(
-          TERMINATION_REASON_INFEASIBLE_OR_UNBOUNDED,
+      return InfeasibleOrUnboundedTerminationProto(
+          is_maximize,
+          /*dual_feasibility_status=*/FEASIBILITY_STATUS_UNDETERMINED,
           JoinDetails(gscip_status_detail,
                       "underlying gSCIP status: INF_OR_UNBD"));
-
     case GScipOutput::TERMINATE:
-      return TerminateForLimit(
-          LIMIT_INTERRUPTED, /*feasible=*/has_feasible_solution,
+      return LimitTerminationProto(
+          is_maximize, LIMIT_INTERRUPTED, optional_finite_primal_objective,
+          optional_dual_objective,
           JoinDetails(gscip_status_detail,
                       "underlying gSCIP status: TERMINATE"));
     case GScipOutput::INVALID_SOLVER_PARAMETERS:
@@ -1005,26 +994,13 @@ absl::StatusOr<SolveResultProto> GScipSolver::CreateSolveResultProto(
   const bool has_feasible_solution = solve_result.solutions_size() > 0;
   ASSIGN_OR_RETURN(
       *solve_result.mutable_termination(),
-      ConvertTerminationReason(gscip_result.gscip_output.status(),
+      ConvertTerminationReason(is_maximize, gscip_result.gscip_output.status(),
                                gscip_result.gscip_output.status_detail(),
+                               gscip_result.gscip_output.stats(),
                                /*has_feasible_solution=*/has_feasible_solution,
                                /*had_cutoff=*/cutoff.has_value()));
-  *solve_result.mutable_solve_stats()->mutable_problem_status() =
-      GetProblemStatusProto(
-          gscip_result.gscip_output.status(),
-          /*has_feasible_solution=*/has_feasible_solution,
-          /*has_finite_dual_bound=*/
-          std::isfinite(gscip_result.gscip_output.stats().best_bound()),
-          /*was_cutoff=*/solve_result.termination().limit() == LIMIT_CUTOFF);
   SolveStatsProto* const common_stats = solve_result.mutable_solve_stats();
   const GScipSolvingStats& gscip_stats = gscip_result.gscip_output.stats();
-  common_stats->set_best_dual_bound(gscip_stats.best_bound());
-  // If we found no solutions meeting the cutoff, we have no primal bound.
-  if (has_feasible_solution) {
-    common_stats->set_best_primal_bound(gscip_stats.best_objective());
-  } else {
-    common_stats->set_best_primal_bound(is_maximize ? -kInf : kInf);
-  }
 
   common_stats->set_node_count(gscip_stats.node_count());
   common_stats->set_simplex_iterations(gscip_stats.primal_simplex_iterations() +
@@ -1036,19 +1012,16 @@ absl::StatusOr<SolveResultProto> GScipSolver::CreateSolveResultProto(
 }
 
 GScipSolver::GScipSolver(std::unique_ptr<GScip> gscip)
-    : gscip_(std::move(ABSL_DIE_IF_NULL(gscip))) {
-  interrupt_event_handler_.Register(gscip_.get());
-}
+    : gscip_(std::move(ABSL_DIE_IF_NULL(gscip))) {}
 
 absl::StatusOr<std::unique_ptr<SolverInterface>> GScipSolver::New(
-    const ModelProto& model, const InitArgs& init_args) {
+    const ModelProto& model, const InitArgs&) {
   RETURN_IF_ERROR(ModelIsSupported(model, kGscipSupportedStructures, "SCIP"));
   ASSIGN_OR_RETURN(std::unique_ptr<GScip> gscip, GScip::Create(model.name()));
   RETURN_IF_ERROR(gscip->SetMaximize(model.objective().maximize()));
   RETURN_IF_ERROR(gscip->SetObjectiveOffset(model.objective().offset()));
-  // Can't be const because it had to be moved into the StatusOr and be
-  // convereted to std::unique_ptr<SolverInterface>.
   auto solver = absl::WrapUnique(new GScipSolver(std::move(gscip)));
+  RETURN_IF_ERROR(solver->RegisterHandlers());
 
   RETURN_IF_ERROR(solver->AddVariables(
       model.variables(),
@@ -1083,11 +1056,9 @@ absl::StatusOr<SolveResultProto> GScipSolver::Solve(
       GScipSolverCallbackHandler::RegisterIfNeeded(callback_registration, cb,
                                                    start, gscip_->scip());
 
-  std::unique_ptr<GScipSolverMessageCallbackHandler> message_cb_handler;
-  if (message_cb != nullptr) {
-    message_cb_handler =
-        std::make_unique<GScipSolverMessageCallbackHandler>(message_cb);
-  }
+  BufferedMessageCallback buffered_message_callback(std::move(message_cb));
+  auto message_cb_cleanup = absl::MakeCleanup(
+      [&buffered_message_callback]() { buffered_message_callback.Flush(); });
 
   ASSIGN_OR_RETURN(auto gscip_parameters, MergeParameters(parameters));
 
@@ -1115,15 +1086,21 @@ absl::StatusOr<SolveResultProto> GScipSolver::Solve(
   RETURN_IF_ERROR(ListInvertedBounds().ToStatus());
   RETURN_IF_ERROR(ListInvalidIndicators().ToStatus());
 
-  ASSIGN_OR_RETURN(GScipResult gscip_result,
-                   gscip_->Solve(gscip_parameters,
-                                 /*legacy_params=*/"",
-                                 message_cb_handler != nullptr
-                                     ? message_cb_handler->MessageHandler()
-                                     : nullptr));
+  GScipMessageHandler gscip_msg_cb = nullptr;
+  if (buffered_message_callback.has_user_message_callback()) {
+    gscip_msg_cb = [&buffered_message_callback](
+                       const auto, const absl::string_view message) {
+      buffered_message_callback.OnMessage(message);
+    };
+  }
 
-  // Flushes the last unfinished message as early as possible.
-  message_cb_handler.reset();
+  ASSIGN_OR_RETURN(
+      GScipResult gscip_result,
+      gscip_->Solve(gscip_parameters,
+                    /*legacy_params=*/"", std::move(gscip_msg_cb)));
+
+  // Flush the potential last unfinished line.
+  std::move(message_cb_cleanup).Invoke();
 
   if (callback_handler) {
     RETURN_IF_ERROR(callback_handler->Flush());
@@ -1367,6 +1344,11 @@ absl::StatusOr<bool> GScipSolver::Update(const ModelUpdateProto& model_update) {
   return true;
 }
 
+absl::Status GScipSolver::RegisterHandlers() {
+  RETURN_IF_ERROR(interrupt_event_handler_.Register(gscip_.get()));
+  return absl::OkStatus();
+}
+
 GScipSolver::InterruptEventHandler::InterruptEventHandler()
     : GScipEventHandler(
           {.name = "interrupt event handler",
@@ -1421,6 +1403,14 @@ SCIP_RETCODE GScipSolver::InterruptEventHandler::TryCallInterruptIfNeeded(
     default:
       return SCIPinterruptSolve(gscip->scip());
   }
+}
+
+absl::StatusOr<ComputeInfeasibleSubsystemResultProto>
+GScipSolver::ComputeInfeasibleSubsystem(const SolveParametersProto&,
+                                        MessageCallback,
+                                        SolveInterrupter* const) {
+  return absl::UnimplementedError(
+      "SCIP does not provide a method to compute an infeasible subsystem");
 }
 
 MATH_OPT_REGISTER_SOLVER(SOLVER_TYPE_GSCIP, GScipSolver::New)

@@ -14,6 +14,8 @@
 #ifndef OR_TOOLS_SAT_LINEAR_PROPAGATION_H_
 #define OR_TOOLS_SAT_LINEAR_PROPAGATION_H_
 
+#include <stdint.h>
+
 #include <deque>
 #include <functional>
 #include <ostream>
@@ -21,13 +23,20 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/container/inlined_vector.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "ortools/base/strong_vector.h"
 #include "ortools/sat/integer.h"
+#include "ortools/sat/model.h"
 #include "ortools/sat/sat_base.h"
 #include "ortools/sat/sat_solver.h"
 #include "ortools/sat/synchronization.h"
+#include "ortools/util/bitset.h"
+#include "ortools/util/rev.h"
+#include "ortools/util/strong_integers.h"
+#include "ortools/util/time_limit.h"
 
 namespace operations_research {
 namespace sat {
@@ -37,7 +46,7 @@ DEFINE_STRONG_INDEX_TYPE(EnforcementId);
 // A FIFO queue that allows some form of reordering of its element.
 class CustomFifoQueue {
  public:
-  CustomFifoQueue() {}
+  CustomFifoQueue() = default;
 
   // Note that this requires the queue to be empty or to never have been poped
   // before.
@@ -181,7 +190,7 @@ class LinearPropagator : public PropagatorInterface, ReversibleInterface {
   // We try to pack the struct as much as possible. Using a maximum size of
   // 1 << 29 should be okay since we split long constraint anyway. Technically
   // we could use int16_t or even int8_t if we wanted, but we just need to make
-  // sure we do split ALL constraints, not just the one from the initial mode.
+  // sure we do split ALL constraints, not just the one from the initial model.
   //
   // TODO(user): We could also move some less often used fields out. like
   // initial size and enf_id that are only needed when we push something.

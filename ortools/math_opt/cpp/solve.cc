@@ -18,7 +18,6 @@
 #include <optional>
 #include <utility>
 
-#include "absl/container/flat_hash_set.h"
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -26,7 +25,19 @@
 #include "ortools/base/status_macros.h"
 #include "ortools/math_opt/callback.pb.h"
 #include "ortools/math_opt/core/solver.h"
+#include "ortools/math_opt/cpp/callback.h"
+#include "ortools/math_opt/cpp/compute_infeasible_subsystem_arguments.h"
+#include "ortools/math_opt/cpp/compute_infeasible_subsystem_result.h"
+#include "ortools/math_opt/cpp/enums.h"
 #include "ortools/math_opt/cpp/model.h"
+#include "ortools/math_opt/cpp/model_solve_parameters.h"
+#include "ortools/math_opt/cpp/parameters.h"
+#include "ortools/math_opt/cpp/solve_arguments.h"
+#include "ortools/math_opt/cpp/solve_result.h"
+#include "ortools/math_opt/cpp/solver_init_arguments.h"
+#include "ortools/math_opt/cpp/streamable_solver_init_arguments.h"
+#include "ortools/math_opt/cpp/update_tracker.h"
+#include "ortools/math_opt/infeasible_subsystem.pb.h"
 #include "ortools/math_opt/storage/model_storage.h"
 #include "ortools/util/status_macros.h"
 
@@ -36,13 +47,10 @@ namespace math_opt {
 namespace {
 
 Solver::InitArgs ToSolverInitArgs(const SolverInitArguments& arguments) {
-  Solver::InitArgs solver_init_args;
-  solver_init_args.streamable = arguments.streamable.Proto();
-  if (arguments.non_streamable != nullptr) {
-    solver_init_args.non_streamable = arguments.non_streamable.get();
-  }
-
-  return solver_init_args;
+  return {
+      .streamable = arguments.streamable.Proto(),
+      .non_streamable = arguments.non_streamable.get(),
+  };
 }
 
 absl::StatusOr<SolveResult> CallSolve(
@@ -103,9 +111,26 @@ absl::StatusOr<SolveResult> Solve(const Model& model,
                                   const SolveArguments& solve_args,
                                   const SolverInitArguments& init_args) {
   ASSIGN_OR_RETURN(const std::unique_ptr<Solver> solver,
-                   Solver::New(EnumToProto(solver_type), model.ExportModel(),
+                   Solver::New(EnumToProto(solver_type),
+                               model.ExportModel(init_args.remove_names),
                                ToSolverInitArgs(init_args)));
   return CallSolve(*solver, model.storage(), solve_args);
+}
+
+absl::StatusOr<ComputeInfeasibleSubsystemResult> ComputeInfeasibleSubsystem(
+    const Model& model, const SolverType solver_type,
+    const ComputeInfeasibleSubsystemArguments& infeasible_subsystem_args,
+    const SolverInitArguments& init_args) {
+  ASSIGN_OR_RETURN(
+      const ComputeInfeasibleSubsystemResultProto result_proto,
+      Solver::NonIncrementalComputeInfeasibleSubsystem(
+          model.ExportModel(init_args.remove_names), EnumToProto(solver_type),
+          ToSolverInitArgs(init_args),
+          {.parameters = infeasible_subsystem_args.parameters.Proto(),
+           .message_callback = infeasible_subsystem_args.message_callback,
+           .interrupter = infeasible_subsystem_args.interrupter}));
+  return ComputeInfeasibleSubsystemResult::FromProto(model.storage(),
+                                                     result_proto);
 }
 
 absl::StatusOr<std::unique_ptr<IncrementalSolver>> IncrementalSolver::New(
@@ -115,7 +140,8 @@ absl::StatusOr<std::unique_ptr<IncrementalSolver>> IncrementalSolver::New(
     return absl::InvalidArgumentError("input model can't be null");
   }
   std::unique_ptr<UpdateTracker> update_tracker = model->NewUpdateTracker();
-  ASSIGN_OR_RETURN(const ModelProto model_proto, update_tracker->ExportModel());
+  ASSIGN_OR_RETURN(const ModelProto model_proto,
+                   update_tracker->ExportModel(arguments.remove_names));
   ASSIGN_OR_RETURN(std::unique_ptr<Solver> solver,
                    Solver::New(EnumToProto(solver_type), model_proto,
                                ToSolverInitArgs(arguments)));
@@ -143,7 +169,7 @@ absl::StatusOr<SolveResult> IncrementalSolver::Solve(
 
 absl::StatusOr<UpdateResult> IncrementalSolver::Update() {
   ASSIGN_OR_RETURN(std::optional<ModelUpdateProto> model_update,
-                   update_tracker_->ExportModelUpdate());
+                   update_tracker_->ExportModelUpdate(init_args_.remove_names));
   if (!model_update) {
     return UpdateResult(true, std::move(model_update));
   }
@@ -157,7 +183,7 @@ absl::StatusOr<UpdateResult> IncrementalSolver::Update() {
   }
 
   ASSIGN_OR_RETURN(const ModelProto model_proto,
-                   update_tracker_->ExportModel());
+                   update_tracker_->ExportModel(init_args_.remove_names));
   OR_ASSIGN_OR_RETURN3(solver_,
                        Solver::New(EnumToProto(solver_type_), model_proto,
                                    ToSolverInitArgs(init_args_)),

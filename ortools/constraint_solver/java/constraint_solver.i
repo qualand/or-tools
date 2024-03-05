@@ -127,9 +127,10 @@ PROTECT_FROM_FAILURE(Solver::Fail(), arg1);
 
 %{
 #include <setjmp.h>
+
 #include <vector>
 
-#include "ortools/base/integral_types.h"
+#include "ortools/base/types.h"
 #include "ortools/constraint_solver/constraint_solver.h"
 #include "ortools/constraint_solver/constraint_solveri.h"
 %}
@@ -728,6 +729,7 @@ import java.util.HashSet;
 %typemap(javacode) Solver %{
   /**
    * This exceptions signal that a failure has been raised in the C++ world.
+   * @author lperron@google.com (Laurent Perron)
    */
   public static class FailException extends Exception {
     public FailException() {

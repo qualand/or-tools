@@ -11,12 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Test routing API."""
 
-from functools import partial
+"""Test Routing API."""
+
+import functools
 
 import unittest
-
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
@@ -45,8 +45,7 @@ def Three(unused_i, unused_j):
     return 1
 
 
-class Callback(object):
-
+class Callback:
     def __init__(self, model):
         self.model = model
         self.costs = []
@@ -55,13 +54,10 @@ class Callback(object):
         self.costs.append(self.model.CostVar().Max())
 
 
-class TestRoutingIndexManager(unittest.TestCase):
-
+class TestPyWrapRoutingIndexManager(unittest.TestCase):
     def testCtor(self):
         manager = pywrapcp.RoutingIndexManager(42, 3, 7)
         self.assertIsNotNone(manager)
-        if __debug__:
-            print(f'class RoutingIndexManager: {dir(manager)}')
         self.assertEqual(42, manager.GetNumberOfNodes())
         self.assertEqual(3, manager.GetNumberOfVehicles())
         self.assertEqual(42 + 3 * 2 - 1, manager.GetNumberOfIndices())
@@ -86,13 +82,11 @@ class TestRoutingIndexManager(unittest.TestCase):
         self.assertEqual(3, manager.GetNumberOfVehicles())
         self.assertEqual(42, manager.GetNumberOfIndices())
         for i in range(manager.GetNumberOfVehicles()):
-            self.assertEqual(i + 1,
-                             manager.IndexToNode(manager.GetStartIndex(i)))
+            self.assertEqual(i + 1, manager.IndexToNode(manager.GetStartIndex(i)))
             self.assertEqual(i + 4, manager.IndexToNode(manager.GetEndIndex(i)))
 
 
-class TestRoutingModel(unittest.TestCase):
-
+class TestPyWrapRoutingModel(unittest.TestCase):
     def testCtor(self):
         manager = pywrapcp.RoutingIndexManager(42, 3, 7)
         self.assertIsNotNone(manager)
@@ -101,8 +95,6 @@ class TestRoutingModel(unittest.TestCase):
         for i in range(manager.GetNumberOfVehicles()):
             self.assertEqual(7, manager.IndexToNode(model.Start(i)))
             self.assertEqual(7, manager.IndexToNode(model.End(i)))
-        if __debug__:
-            print(f'class RoutingModel: {dir(model)}')
 
     def testSolve(self):
         manager = pywrapcp.RoutingIndexManager(42, 3, 7)
@@ -111,7 +103,7 @@ class TestRoutingModel(unittest.TestCase):
         self.assertIsNotNone(model)
         self.assertEqual(model.ROUTING_NOT_SOLVED, model.status())
         assignment = model.Solve()
-        self.assertEqual(model.ROUTING_SUCCESS, model.status())
+        self.assertEqual(model.ROUTING_OPTIMAL, model.status())
         self.assertIsNotNone(assignment)
         self.assertEqual(0, assignment.ObjectiveValue())
 
@@ -122,7 +114,7 @@ class TestRoutingModel(unittest.TestCase):
         self.assertIsNotNone(model)
         self.assertEqual(model.ROUTING_NOT_SOLVED, model.status())
         assignment = model.Solve()
-        self.assertEqual(model.ROUTING_SUCCESS, model.status())
+        self.assertEqual(model.ROUTING_OPTIMAL, model.status())
         self.assertIsNotNone(assignment)
         self.assertEqual(0, assignment.ObjectiveValue())
 
@@ -132,11 +124,11 @@ class TestRoutingModel(unittest.TestCase):
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         self.assertEqual(1, transit_idx)
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
-        self.assertEqual(pywrapcp.RoutingModel.ROUTING_NOT_SOLVED,
-                         model.status())
+        self.assertEqual(pywrapcp.RoutingModel.ROUTING_NOT_SOLVED, model.status())
         assignment = model.Solve()
         self.assertTrue(assignment)
         self.assertEqual(pywrapcp.RoutingModel.ROUTING_SUCCESS, model.status())
@@ -147,8 +139,7 @@ class TestRoutingModel(unittest.TestCase):
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
-        transit_id = model.RegisterTransitCallback(
-            lambda from_index, to_index: 1)
+        transit_id = model.RegisterTransitCallback(lambda from_index, to_index: 1)
         self.assertEqual(1, transit_id)
         model.SetArcCostEvaluatorOfAllVehicles(transit_id)
         self.assertEqual(model.ROUTING_NOT_SOLVED, model.status())
@@ -162,13 +153,13 @@ class TestRoutingModel(unittest.TestCase):
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
-        matrix = [[i + 1 for i in range(5)] for j in range(5)]
+        matrix = [[i + 1 for i in range(5)] for _ in range(5)]
         transit_idx = model.RegisterTransitMatrix(matrix)
         self.assertEqual(1, transit_idx)
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         self.assertEqual(model.ROUTING_NOT_SOLVED, model.status())
         assignment = model.Solve()
-        self.assertIsNotNone(assignment)
+        self.assertTrue(assignment)
         self.assertEqual(model.ROUTING_SUCCESS, model.status())
         self.assertEqual(15, assignment.ObjectiveValue())
 
@@ -178,7 +169,8 @@ class TestRoutingModel(unittest.TestCase):
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         transit_idx = model.RegisterUnaryTransitCallback(
-            partial(UnaryTransitDistance, manager))
+            functools.partial(UnaryTransitDistance, manager)
+        )
         self.assertEqual(1, transit_idx)
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         self.assertEqual(model.ROUTING_NOT_SOLVED, model.status())
@@ -217,19 +209,22 @@ class TestRoutingModel(unittest.TestCase):
         self.assertEqual(45, assignment.ObjectiveValue())
 
     def testTSP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         self.assertEqual(model.ROUTING_NOT_SOLVED, model.status())
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(model.ROUTING_SUCCESS, model.status())
         self.assertEqual(90, assignment.ObjectiveValue())
@@ -243,18 +238,21 @@ class TestRoutingModel(unittest.TestCase):
         self.assertEqual(expected_visited_nodes, visited_nodes)
 
     def testVRP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 2, [0, 1], [1, 0])
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(89, assignment.ObjectiveValue())
         # Inspect solution
@@ -265,117 +263,122 @@ class TestRoutingModel(unittest.TestCase):
             index = assignment.Value(model.NextVar(index))
             visited_nodes.append(manager.IndexToNode(index))
         self.assertEqual(expected_visited_nodes, visited_nodes)
-        self.assertTrue(
-            model.IsEnd(assignment.Value(model.NextVar(model.Start(0)))))
+        self.assertTrue(model.IsEnd(assignment.Value(model.NextVar(model.Start(0)))))
 
     def testDimensionTSP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Add generic dimension
-        model.AddDimension(transit_idx, 90, 90, True, 'distance')
-        distance_dimension = model.GetDimensionOrDie('distance')
+        model.AddDimension(transit_idx, 90, 90, True, "distance")
+        distance_dimension = model.GetDimensionOrDie("distance")
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(90, assignment.ObjectiveValue())
         # Inspect solution
         node = model.Start(0)
         cumul = 0
         while not model.IsEnd(node):
-            self.assertEqual(
-                cumul, assignment.Value(distance_dimension.CumulVar(node)))
+            self.assertEqual(cumul, assignment.Value(distance_dimension.CumulVar(node)))
             next_node = assignment.Value(model.NextVar(node))
             cumul += Distance(node, next_node)
             node = next_node
 
     def testDimensionWithVehicleCapacitiesTSP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Add generic dimension
-        model.AddDimensionWithVehicleCapacity(transit_idx, 90, [90], True,
-                                              'distance')
-        distance_dimension = model.GetDimensionOrDie('distance')
+        model.AddDimensionWithVehicleCapacity(transit_idx, 90, [90], True, "distance")
+        distance_dimension = model.GetDimensionOrDie("distance")
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(90, assignment.ObjectiveValue())
         # Inspect solution
         node = model.Start(0)
         cumul = 0
         while not model.IsEnd(node):
-            self.assertEqual(
-                cumul, assignment.Value(distance_dimension.CumulVar(node)))
+            self.assertEqual(cumul, assignment.Value(distance_dimension.CumulVar(node)))
             next_node = assignment.Value(model.NextVar(node))
             cumul += Distance(node, next_node)
             node = next_node
 
     def testDimensionWithVehicleTransitsTSP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Add generic dimension
-        model.AddDimensionWithVehicleTransits([transit_idx], 90, 90, True,
-                                              'distance')
-        distance_dimension = model.GetDimensionOrDie('distance')
+        model.AddDimensionWithVehicleTransits([transit_idx], 90, 90, True, "distance")
+        distance_dimension = model.GetDimensionOrDie("distance")
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(90, assignment.ObjectiveValue())
         # Inspect solution
         node = model.Start(0)
         cumul = 0
         while not model.IsEnd(node):
-            self.assertEqual(
-                cumul, assignment.Value(distance_dimension.CumulVar(node)))
+            self.assertEqual(cumul, assignment.Value(distance_dimension.CumulVar(node)))
             next_node = assignment.Value(model.NextVar(node))
             cumul += Distance(node, next_node)
             node = next_node
 
     def testDimensionWithVehicleTransitsVRP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 3, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Add generic dimension
         distances = [
             model.RegisterTransitCallback(One),
             model.RegisterTransitCallback(Two),
-            model.RegisterTransitCallback(Three)
+            model.RegisterTransitCallback(Three),
         ]
-        model.AddDimensionWithVehicleTransits(distances, 90, 90, True,
-                                              'distance')
-        distance_dimension = model.GetDimensionOrDie('distance')
+        model.AddDimensionWithVehicleTransits(distances, 90, 90, True, "distance")
+        distance_dimension = model.GetDimensionOrDie("distance")
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(90, assignment.ObjectiveValue())
         # Inspect solution
@@ -384,7 +387,8 @@ class TestRoutingModel(unittest.TestCase):
             cumul = 0
             while not model.IsEnd(node):
                 self.assertEqual(
-                    cumul, assignment.Min(distance_dimension.CumulVar(node)))
+                    cumul, assignment.Min(distance_dimension.CumulVar(node))
+                )
                 next_node = assignment.Value(model.NextVar(node))
                 # Increment cumul by the vehicle distance which is equal to the vehicle
                 # index + 1, cf. distances.
@@ -392,58 +396,61 @@ class TestRoutingModel(unittest.TestCase):
                 node = next_node
 
     def testConstantDimensionTSP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 3, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Add constant dimension
-        constant_id, success = model.AddConstantDimension(1, 100, True, 'count')
+        constant_id, success = model.AddConstantDimension(1, 100, True, "count")
         self.assertTrue(success)
         self.assertEqual(transit_idx + 1, constant_id)
-        count_dimension = model.GetDimensionOrDie('count')
+        count_dimension = model.GetDimensionOrDie("count")
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(90, assignment.ObjectiveValue())
         # Inspect solution
         node = model.Start(0)
         count = 0
         while not model.IsEnd(node):
-            self.assertEqual(count,
-                             assignment.Value(count_dimension.CumulVar(node)))
+            self.assertEqual(count, assignment.Value(count_dimension.CumulVar(node)))
             count += 1
             node = assignment.Value(model.NextVar(node))
         self.assertEqual(10, count)
 
     def testVectorDimensionTSP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Add vector dimension
         values = list(range(10))
-        unary_transit_idx, success = model.AddVectorDimension(
-            values,
-            100,  # capacity
-            True,  # fix_start_cumul_to_zero
-            'vector')
+        unary_transit_id, success = model.AddVectorDimension(
+            values, 100, True, "vector"
+        )
         self.assertTrue(success)
-        self.assertEqual(transit_idx + 1, unary_transit_idx)
-        vector_dimension = model.GetDimensionOrDie('vector')
+        self.assertEqual(transit_idx + 1, unary_transit_id)
+        vector_dimension = model.GetDimensionOrDie("vector")
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         self.assertEqual(model.ROUTING_NOT_SOLVED, model.status())
         assignment = model.SolveWithParameters(search_parameters)
         self.assertIsNotNone(assignment)
@@ -453,33 +460,32 @@ class TestRoutingModel(unittest.TestCase):
         node = model.Start(0)
         cumul = 0
         while not model.IsEnd(node):
-            self.assertEqual(cumul,
-                             assignment.Value(vector_dimension.CumulVar(node)))
+            self.assertEqual(cumul, assignment.Value(vector_dimension.CumulVar(node)))
             cumul += values[node]
             node = assignment.Value(model.NextVar(node))
 
     def testMatrixDimensionTSP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(5, 1, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
-        matrix = [[i + j for i in range(5)] for j in range(5)]
-        transit_idx = model.RegisterTransitMatrix(matrix)
-        model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
+        cost = model.RegisterTransitCallback(
+            functools.partial(TransitDistance, manager)
+        )
+        model.SetArcCostEvaluatorOfAllVehicles(cost)
         # Add matrix dimension
-        matrix_transit_idx, success = model.AddMatrixDimension(
-            matrix,
-            100,  # capacity
-            True,  # fix_start_cumul_to_zero
-            'matrix')
+        values = [[j for _ in range(5)] for j in range(5)]
+        transit_id, success = model.AddMatrixDimension(values, 100, True, "matrix")
         self.assertTrue(success)
-        self.assertEqual(transit_idx + 1, matrix_transit_idx)
-        dimension = model.GetDimensionOrDie('matrix')
+        self.assertEqual(cost + 1, transit_id)
+        dimension = model.GetDimensionOrDie("matrix")
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         self.assertEqual(model.ROUTING_NOT_SOLVED, model.status())
         assignment = model.SolveWithParameters(search_parameters)
         self.assertIsNotNone(assignment)
@@ -490,10 +496,8 @@ class TestRoutingModel(unittest.TestCase):
         cumul = 0
         while not model.IsEnd(index):
             self.assertEqual(cumul, assignment.Value(dimension.CumulVar(index)))
-            prev_index = index
+            cumul += values[manager.IndexToNode(index)][manager.IndexToNode(index)]
             index = assignment.Value(model.NextVar(index))
-            cumul += matrix[manager.IndexToNode(prev_index)][
-                manager.IndexToNode(index)]
 
     def testMatrixDimensionVRP(self):
         manager = pywrapcp.RoutingIndexManager(5, 2, 0)
@@ -506,17 +510,16 @@ class TestRoutingModel(unittest.TestCase):
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Add matrix dimension
         matrix_transit_idx, success = model.AddMatrixDimension(
-            matrix,
-            10,  # capacity
-            True,  # fix_start_cumul_to_zero
-            'matrix')
+            matrix, 10, True, "matrix"  # capacity  # fix_start_cumul_to_zero
+        )
         self.assertTrue(success)
         self.assertEqual(transit_idx + 1, matrix_transit_idx)
-        dimension = model.GetDimensionOrDie('matrix')
+        dimension = model.GetDimensionOrDie("matrix")
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         self.assertEqual(model.ROUTING_NOT_SOLVED, model.status())
         assignment = model.SolveWithParameters(search_parameters)
         self.assertIsNotNone(assignment)
@@ -527,34 +530,42 @@ class TestRoutingModel(unittest.TestCase):
             index = model.Start(v)
             cumul = 0
             while not model.IsEnd(index):
-                self.assertEqual(cumul,
-                                 assignment.Value(dimension.CumulVar(index)))
+                self.assertEqual(cumul, assignment.Value(dimension.CumulVar(index)))
                 prev_index = index
                 index = assignment.Value(model.NextVar(index))
                 cumul += matrix[manager.IndexToNode(prev_index)][
-                    manager.IndexToNode(index)]
+                    manager.IndexToNode(index)
+                ]
 
     def testDisjunctionTSP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Add disjunctions
-        disjunctions = [[manager.NodeToIndex(1),
-                         manager.NodeToIndex(2)], [manager.NodeToIndex(3)],
-                        [manager.NodeToIndex(4)], [manager.NodeToIndex(5)],
-                        [manager.NodeToIndex(6)], [manager.NodeToIndex(7)],
-                        [manager.NodeToIndex(8)], [manager.NodeToIndex(9)]]
+        disjunctions = [
+            [manager.NodeToIndex(1), manager.NodeToIndex(2)],
+            [manager.NodeToIndex(3)],
+            [manager.NodeToIndex(4)],
+            [manager.NodeToIndex(5)],
+            [manager.NodeToIndex(6)],
+            [manager.NodeToIndex(7)],
+            [manager.NodeToIndex(8)],
+            [manager.NodeToIndex(9)],
+        ]
         for disjunction in disjunctions:
             model.AddDisjunction(disjunction)
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(86, assignment.ObjectiveValue())
         # Inspect solution
@@ -566,30 +577,34 @@ class TestRoutingModel(unittest.TestCase):
         self.assertEqual(9, count)
 
     def testDisjunctionPenaltyTSP(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Add disjunctions
-        disjunctions = [([manager.NodeToIndex(1),
-                          manager.NodeToIndex(2)], 1000),
-                        ([manager.NodeToIndex(3)], 1000),
-                        ([manager.NodeToIndex(4)], 1000),
-                        ([manager.NodeToIndex(5)], 1000),
-                        ([manager.NodeToIndex(6)], 1000),
-                        ([manager.NodeToIndex(7)], 1000),
-                        ([manager.NodeToIndex(8)], 1000),
-                        ([manager.NodeToIndex(9)], 0)]
+        disjunctions = [
+            ([manager.NodeToIndex(1), manager.NodeToIndex(2)], 1000),
+            ([manager.NodeToIndex(3)], 1000),
+            ([manager.NodeToIndex(4)], 1000),
+            ([manager.NodeToIndex(5)], 1000),
+            ([manager.NodeToIndex(6)], 1000),
+            ([manager.NodeToIndex(7)], 1000),
+            ([manager.NodeToIndex(8)], 1000),
+            ([manager.NodeToIndex(9)], 0),
+        ]
         for disjunction, penalty in disjunctions:
             model.AddDisjunction(disjunction, penalty)
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE)
+            routing_enums_pb2.FirstSolutionStrategy.FIRST_UNBOUND_MIN_VALUE
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(68, assignment.ObjectiveValue())
         # Inspect solution
@@ -601,9 +616,9 @@ class TestRoutingModel(unittest.TestCase):
         self.assertEqual(8, count)
 
     def testRoutingModelParameters(self):
+        # Create routing model with parameters
         parameters = pywrapcp.DefaultRoutingModelParameters()
-        parameters.solver_parameters.CopyFrom(
-            pywrapcp.Solver.DefaultSolverParameters())
+        parameters.solver_parameters.CopyFrom(pywrapcp.Solver.DefaultSolverParameters())
         parameters.solver_parameters.trace_propagation = True
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
         self.assertIsNotNone(manager)
@@ -626,40 +641,43 @@ class TestRoutingModel(unittest.TestCase):
         self.assertTrue(profile)  # Verify it's not empty.
 
     def testRoutingSearchParameters(self):
+        # Create routing model
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Close with parameters
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.SAVINGS)
+            routing_enums_pb2.FirstSolutionStrategy.SAVINGS
+        )
         search_parameters.local_search_metaheuristic = (
-            routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH)
-        search_parameters.local_search_operators.use_two_opt = (
-            pywrapcp.BOOL_FALSE)
+            routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+        )
+        search_parameters.local_search_operators.use_two_opt = pywrapcp.BOOL_FALSE
         search_parameters.solution_limit = 20
         model.CloseModelWithParameters(search_parameters)
         # Solve with parameters
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(
-            11, model.GetNumberOfDecisionsInFirstSolution(search_parameters))
-        self.assertEqual(
-            0, model.GetNumberOfRejectsInFirstSolution(search_parameters))
+            11, model.GetNumberOfDecisionsInFirstSolution(search_parameters)
+        )
+        self.assertEqual(0, model.GetNumberOfRejectsInFirstSolution(search_parameters))
         self.assertEqual(90, assignment.ObjectiveValue())
         assignment = model.SolveFromAssignmentWithParameters(
-            assignment, search_parameters)
+            assignment, search_parameters
+        )
         self.assertEqual(90, assignment.ObjectiveValue())
 
     def testFindErrorInRoutingSearchParameters(self):
         params = pywrapcp.DefaultRoutingSearchParameters()
         params.local_search_operators.use_cross = pywrapcp.BOOL_UNSPECIFIED
-        self.assertIn('cross',
-                      pywrapcp.FindErrorInRoutingSearchParameters(params))
+        self.assertIn("cross", pywrapcp.FindErrorInRoutingSearchParameters(params))
 
     def testCallback(self):
         manager = pywrapcp.RoutingIndexManager(10, 1, 0)
@@ -667,13 +685,15 @@ class TestRoutingModel(unittest.TestCase):
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         callback = Callback(model)
         model.AddAtSolutionCallback(callback)
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+            routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+        )
         assignment = model.SolveWithParameters(search_parameters)
         self.assertEqual(90, assignment.ObjectiveValue())
         self.assertEqual(len(callback.costs), 1)
@@ -686,7 +706,8 @@ class TestRoutingModel(unittest.TestCase):
         self.assertIsNotNone(model)
         # TODO(user): porting this segfaults the tests.
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         routes = [
             [
@@ -695,19 +716,20 @@ class TestRoutingModel(unittest.TestCase):
                 manager.NodeToIndex(5),
                 manager.NodeToIndex(4),
                 manager.NodeToIndex(2),
-                manager.NodeToIndex(6)
+                manager.NodeToIndex(6),
             ],
             [
                 manager.NodeToIndex(7),
                 manager.NodeToIndex(9),
-                manager.NodeToIndex(8)
+                manager.NodeToIndex(8),
             ],
         ]
         assignment = model.ReadAssignmentFromRoutes(routes, False)
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.solution_limit = 1
         solution = model.SolveFromAssignmentWithParameters(
-            assignment, search_parameters)
+            assignment, search_parameters
+        )
         self.assertEqual(90, solution.ObjectiveValue())
         for vehicle in range(0, model.vehicles()):
             node = model.Start(vehicle)
@@ -715,8 +737,7 @@ class TestRoutingModel(unittest.TestCase):
             while not model.IsEnd(node):
                 node = solution.Value(model.NextVar(node))
                 if not model.IsEnd(node):
-                    self.assertEqual(routes[vehicle][count],
-                                     manager.IndexToNode(node))
+                    self.assertEqual(routes[vehicle][count], manager.IndexToNode(node))
                     count += 1
 
     def testAutomaticFirstSolutionStrategy_simple(self):
@@ -726,14 +747,16 @@ class TestRoutingModel(unittest.TestCase):
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         self.assertIsNotNone(model.SolveWithParameters(search_parameters))
         self.assertEqual(
             routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC,
-            model.GetAutomaticFirstSolutionStrategy())
+            model.GetAutomaticFirstSolutionStrategy(),
+        )
 
     def testAutomaticFirstSolutionStrategy_pd(self):
         manager = pywrapcp.RoutingIndexManager(31, 7, 0)
@@ -742,33 +765,33 @@ class TestRoutingModel(unittest.TestCase):
         self.assertIsNotNone(model)
         # Add cost function
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
+            functools.partial(TransitDistance, manager)
+        )
         model.SetArcCostEvaluatorOfAllVehicles(transit_idx)
-        self.assertTrue(
-            model.AddDimension(transit_idx, 0, 1000, True, 'distance'))
-        dst_dimension = model.GetDimensionOrDie('distance')
+        self.assertTrue(model.AddDimension(transit_idx, 0, 1000, True, "distance"))
+        dst_dimension = model.GetDimensionOrDie("distance")
         # Add few Pickup and Delivery
         for request in [[2 * i, 2 * i + 1] for i in range(1, 15)]:
-            print(request)
             pickup_index = manager.NodeToIndex(request[0])
             delivery_index = manager.NodeToIndex(request[1])
             model.AddPickupAndDelivery(pickup_index, delivery_index)
             model.solver().Add(
-                model.VehicleVar(pickup_index) == model.VehicleVar(
-                    delivery_index))
+                model.VehicleVar(pickup_index) == model.VehicleVar(delivery_index)
+            )
             model.solver().Add(
-                dst_dimension.CumulVar(pickup_index) <= dst_dimension.CumulVar(
-                    delivery_index))
+                dst_dimension.CumulVar(pickup_index)
+                <= dst_dimension.CumulVar(delivery_index)
+            )
         # Solve
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         self.assertIsNotNone(model.SolveWithParameters(search_parameters))
         self.assertEqual(
             routing_enums_pb2.FirstSolutionStrategy.PARALLEL_CHEAPEST_INSERTION,
-            model.GetAutomaticFirstSolutionStrategy())
+            model.GetAutomaticFirstSolutionStrategy(),
+        )
 
 
 class TestBoundCost(unittest.TestCase):
-
     def testCtor(self):
         bound_cost = pywrapcp.BoundCost()
         self.assertIsNotNone(bound_cost)
@@ -782,17 +805,16 @@ class TestBoundCost(unittest.TestCase):
 
 
 class TestRoutingDimension(unittest.TestCase):
-
     def testCtor(self):
         manager = pywrapcp.RoutingIndexManager(31, 7, 3)
         self.assertIsNotNone(manager)
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
-        self.assertTrue(
-            model.AddDimension(transit_idx, 90, 90, True, 'distance'))
-        model.GetDimensionOrDie('distance')
+            functools.partial(TransitDistance, manager)
+        )
+        self.assertTrue(model.AddDimension(transit_idx, 90, 90, True, "distance"))
+        model.GetDimensionOrDie("distance")
 
     def testSoftSpanUpperBound(self):
         manager = pywrapcp.RoutingIndexManager(31, 7, 3)
@@ -800,10 +822,10 @@ class TestRoutingDimension(unittest.TestCase):
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
-        self.assertTrue(
-            model.AddDimension(transit_idx, 100, 100, True, 'distance'))
-        dimension = model.GetDimensionOrDie('distance')
+            functools.partial(TransitDistance, manager)
+        )
+        self.assertTrue(model.AddDimension(transit_idx, 100, 100, True, "distance"))
+        dimension = model.GetDimensionOrDie("distance")
 
         bound_cost = pywrapcp.BoundCost(97, 43)
         self.assertIsNotNone(bound_cost)
@@ -822,17 +844,16 @@ class TestRoutingDimension(unittest.TestCase):
         model = pywrapcp.RoutingModel(manager)
         self.assertIsNotNone(model)
         transit_idx = model.RegisterTransitCallback(
-            partial(TransitDistance, manager))
-        self.assertTrue(
-            model.AddDimension(transit_idx, 100, 100, True, 'distance'))
-        dimension = model.GetDimensionOrDie('distance')
+            functools.partial(TransitDistance, manager)
+        )
+        self.assertTrue(model.AddDimension(transit_idx, 100, 100, True, "distance"))
+        dimension = model.GetDimensionOrDie("distance")
 
         bound_cost = pywrapcp.BoundCost(97, 43)
         self.assertIsNotNone(bound_cost)
         self.assertFalse(dimension.HasQuadraticCostSoftSpanUpperBounds())
         for v in range(manager.GetNumberOfVehicles()):
-            dimension.SetQuadraticCostSoftSpanUpperBoundForVehicle(
-                bound_cost, v)
+            dimension.SetQuadraticCostSoftSpanUpperBoundForVehicle(bound_cost, v)
             bc = dimension.GetQuadraticCostSoftSpanUpperBoundForVehicle(v)
             self.assertIsNotNone(bc)
             self.assertEqual(97, bc.bound)
@@ -840,5 +861,5 @@ class TestRoutingDimension(unittest.TestCase):
         self.assertTrue(dimension.HasQuadraticCostSoftSpanUpperBounds())
 
 
-if __name__ == '__main__':
-    unittest.main(verbosity=2)
+if __name__ == "__main__":
+    unittest.main()

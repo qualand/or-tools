@@ -44,14 +44,14 @@ cc_library(
     hdrs = [
         "commandlineflags.h",
         "init_google.h",
-        "integral_types.h",
         "logging.h",
         "stl_logging.h",
+        "types.h",
         "version.h",
     ],
     copts = [
         "-DOR_TOOLS_MAJOR=9",
-        "-DOR_TOOLS_MINOR=5",
+        "-DOR_TOOLS_MINOR=7",
         "-DOR_TOOLS_PATCH=9999",
     ],
     linkopts = select({
@@ -62,9 +62,9 @@ cc_library(
     }),
     deps = [
         ":commandlineflags",
-        ":integral_types",
         ":logging",
         ":macros",
+        ":types",
         "@com_google_absl//absl/base",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
@@ -93,24 +93,18 @@ cc_library(
     ],
     deps = [
         ":base",
-        ":basictypes",
     ],
 )
 
 cc_library(
     name = "basictypes",
     hdrs = ["basictypes.h"],
-    deps = [
-        ":integral_types",
-        ":logging",
-    ],
 )
 
 cc_library(
     name = "bitmap",
     srcs = ["bitmap.cc"],
     hdrs = ["bitmap.h"],
-    deps = [":integral_types"],
 )
 
 cc_library(
@@ -266,9 +260,7 @@ cc_library(
         "hash.h",
     ],
     deps = [
-        ":integral_types",
         "@com_google_absl//absl/strings",
-        #"@com_google_protobuf//:protobuf",
     ],
 )
 
@@ -276,11 +268,6 @@ cc_library(
     name = "int_type",
     hdrs = ["int_type.h"],
     deps = [":base"],
-)
-
-cc_library(
-    name = "integral_types",
-    hdrs = ["integral_types.h"],
 )
 
 cc_library(
@@ -325,8 +312,12 @@ cc_library(
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
-        "@com_google_protobuf//:protobuf",
     ],
+)
+
+cc_library(
+    name = "types",
+    hdrs = ["types.h"],
 )
 
 cc_library(
@@ -337,7 +328,6 @@ cc_library(
         "vlog_is_on.h",
     ],
     deps = [
-        ":integral_types",
         "@com_google_absl//absl/flags:flag",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -360,7 +350,6 @@ cc_library(
     hdrs = ["mathutil.h"],
     deps = [
         ":base",
-        ":basictypes",
     ],
 )
 
@@ -495,7 +484,6 @@ cc_library(
     srcs = ["strtoint.cc"],
     hdrs = ["strtoint.h"],
     deps = [
-        ":integral_types",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
     ],
@@ -506,7 +494,6 @@ cc_library(
     srcs = ["sysinfo.cc"],
     hdrs = ["sysinfo.h"],
     deps = [
-        ":integral_types",
         "@com_google_absl//absl/strings",
     ],
 )
@@ -526,7 +513,6 @@ cc_library(
     srcs = ["timer.cc"],
     hdrs = ["timer.h"],
     deps = [
-        ":integral_types",
         ":macros",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/time",

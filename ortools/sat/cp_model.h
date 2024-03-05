@@ -292,7 +292,7 @@ class LinearExpr {
   const std::vector<int64_t>& coefficients() const { return coefficients_; }
 
   /// Returns true if the expression has no variables.
-  const bool IsConstant() const { return variables_.empty(); }
+  bool IsConstant() const { return variables_.empty(); }
 
   /// Returns the constant term.
   int64_t constant() const { return constant_; }
@@ -406,7 +406,7 @@ class DoubleLinearExpr {
   const std::vector<double>& coefficients() const { return coefficients_; }
 
   // Returns true if the expression has no variable.
-  const bool IsConstant() const { return variables_.empty(); }
+  bool IsConstant() const { return variables_.empty(); }
 
   /// Returns the constant term.
   double constant() const { return constant_; }
@@ -1097,8 +1097,8 @@ class CpModelBuilder {
   /// Export the model to file.
   bool ExportToFile(const std::string& filename) const;
 
-  /// Replaces the current model with the one from the given proto.
-  void CopyFrom(const CpModelProto& model_proto);
+  /// Returns a cloned version of the current model.
+  CpModelBuilder Clone() const;
 
   /// Returns the Boolean variable from its index in the proto.
   BoolVar GetBoolVarFromProtoIndex(int index);
@@ -1114,6 +1114,9 @@ class CpModelBuilder {
   friend class ReservoirConstraint;
   friend class IntervalVar;
   friend class IntVar;
+
+  // Used for cloning a model.
+  void ResetAndImport(const CpModelProto& model_proto);
 
   // Fills the 'expr_proto' with the linear expression represented by 'expr'.
   LinearExpressionProto LinearExprToProto(const LinearExpr& expr,

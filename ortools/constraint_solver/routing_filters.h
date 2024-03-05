@@ -14,15 +14,19 @@
 #ifndef OR_TOOLS_CONSTRAINT_SOLVER_ROUTING_FILTERS_H_
 #define OR_TOOLS_CONSTRAINT_SOLVER_ROUTING_FILTERS_H_
 
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
-#include "ortools/base/integral_types.h"
 #include "ortools/constraint_solver/constraint_solver.h"
 #include "ortools/constraint_solver/constraint_solveri.h"
 #include "ortools/constraint_solver/routing.h"
 #include "ortools/constraint_solver/routing_lp_scheduling.h"
 #include "ortools/constraint_solver/routing_parameters.pb.h"
+#include "ortools/constraint_solver/routing_types.h"
 #include "ortools/util/bitset.h"
 
 namespace operations_research {
@@ -46,7 +50,8 @@ IntVarLocalSearchFilter* MakeTypeRegulationsFilter(
 /// Returns a filter enforcing pickup and delivery constraints for the given
 /// pair of nodes and given policies.
 IntVarLocalSearchFilter* MakePickupDeliveryFilter(
-    const RoutingModel& routing_model, const RoutingModel::IndexPairs& pairs,
+    const RoutingModel& routing_model,
+    const std::vector<PickupDeliveryPair>& pairs,
     const std::vector<RoutingModel::PickupAndDeliveryPolicy>& vehicle_policies);
 
 /// Returns a filter checking that vehicle variable domains are respected.
@@ -77,6 +82,42 @@ LocalSearchFilter* MakeResourceAssignmentFilter(
 
 /// Returns a filter checking the current solution using CP propagation.
 IntVarLocalSearchFilter* MakeCPFeasibilityFilter(RoutingModel* routing_model);
+
+class PathEnergyCostChecker {
+ public:
+  PathEnergyCostChecker(
+      const PathState* path_state, std::vector<int> force_class,
+      std::vector<const std::function<int64_t(int64_t)>*> force_per_class,
+      std::vector<int> distance_class,
+      std::vector<const std::function<int64_t(int64_t, int64_t)>*>
+          distance_per_class,
+      std::vector<int64_t> path_unit_costs,
+      std::vector<bool> path_has_cost_when_empty);
+  bool Check();
+  void Commit();
+  int64_t CommittedCost() const { return committed_total_cost_; }
+  int64_t AcceptedCost() const { return accepted_total_cost_; }
+
+ private:
+  int64_t ComputePathCost(int64_t path_start) const;
+  const PathState* const path_state_;
+  const std::vector<int> force_class_;
+  const std::vector<int> distance_class_;
+  const std::vector<const std::function<int64_t(int64_t)>*> force_per_class_;
+  const std::vector<const std::function<int64_t(int64_t, int64_t)>*>
+      distance_per_class_;
+  const std::vector<int64_t> path_unit_costs_;
+  const std::vector<bool> path_has_cost_when_empty_;
+
+  // Incremental cost computation.
+  int64_t committed_total_cost_;
+  int64_t accepted_total_cost_;
+  std::vector<int64_t> committed_path_cost_;
+};
+
+LocalSearchFilter* MakePathEnergyCostFilter(
+    Solver* solver, std::unique_ptr<PathEnergyCostChecker> checker,
+    const std::string& dimension_name);
 
 /// Appends dimension-based filters to the given list of filters using a path
 /// state.
@@ -130,14 +171,11 @@ class BasePathFilter : public IntVarLocalSearchFilter {
   virtual bool DisableFiltering() const { return false; }
   virtual void OnBeforeSynchronizePaths() {}
   virtual void OnAfterSynchronizePaths() {}
-  virtual void OnSynchronizePathFromStart(int64_t start) {}
+  virtual void OnSynchronizePathFromStart(int64_t) {}
   virtual bool InitializeAcceptPath() { return true; }
   virtual bool AcceptPath(int64_t path_start, int64_t chain_start,
                           int64_t chain_end) = 0;
-  virtual bool FinalizeAcceptPath(int64_t objective_min,
-                                  int64_t objective_max) {
-    return true;
-  }
+  virtual bool FinalizeAcceptPath(int64_t, int64_t) { return true; }
   /// Detects path starts, used to track which node belongs to which path.
   void ComputePathStarts(std::vector<int64_t>* path_starts,
                          std::vector<int>* index_to_path);

@@ -17,12 +17,12 @@
 
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "ortools/base/status_macros.h"
 #include "ortools/linear_solver/linear_solver.pb.h"
 #include "ortools/linear_solver/model_exporter.h"
 #include "ortools/lp_data/mps_reader.h"
 #include "ortools/math_opt/io/proto_converter.h"
 #include "ortools/math_opt/model.pb.h"
-#include "ortools/util/file_util.h"
 
 namespace operations_research::math_opt {
 
@@ -36,7 +36,7 @@ absl::StatusOr<std::string> ModelProtoToMps(const ModelProto& model) {
 absl::StatusOr<ModelProto> ReadMpsFile(const absl::string_view filename) {
   glop::MPSReader mps_reader;
   MPModelProto mp_model;
-  RETURN_IF_ERROR(mps_reader.ParseFile(std::string(filename), &mp_model));
+  RETURN_IF_ERROR(mps_reader.ParseFile(filename, &mp_model));
   return MPModelProtoToMathOptModel(mp_model);
 }
 

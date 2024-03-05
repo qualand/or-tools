@@ -28,7 +28,7 @@ using System.Collections.Generic;
 %include "std_string.i"
 
 %include "ortools/base/base.i"
-%include "ortools/util/csharp/vector.i"
+%import "ortools/util/csharp/vector.i"
 %include "ortools/util/csharp/proto.i"
 
 // We need to forward-declare the proto here, so that PROTO_INPUT involving it
@@ -45,11 +45,11 @@ class RegularLimitParameters;
 %{
 #include <setjmp.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <functional>
 
-#include "ortools/base/integral_types.h"
 #include "ortools/constraint_solver/constraint_solver.h"
 #include "ortools/constraint_solver/constraint_solveri.h"
 #include "ortools/constraint_solver/search_limit.pb.h"
@@ -118,14 +118,26 @@ PROTECT_FROM_FAILURE(IntervalVar::SetEndMax(int64_t m), arg1->solver());
 PROTECT_FROM_FAILURE(IntervalVar::SetEndRange(int64_t mi, int64_t ma),
                      arg1->solver());
 PROTECT_FROM_FAILURE(IntervalVar::SetPerformed(bool val), arg1->solver());
-PROTECT_FROM_FAILURE(Solver::AddConstraint(Constraint* const c), arg1);
+PROTECT_FROM_FAILURE(Solver::AddConstraint(Constraint* c), arg1);
 PROTECT_FROM_FAILURE(Solver::Fail(), arg1);
 #undef PROTECT_FROM_FAILURE
 }  // namespace operations_research
 
 // ############ END DUPLICATED CODE BLOCK ############
 
-%apply int64_t * INOUT { int64_t *const marker };
+%template(IntVector) std::vector<int>;
+%template(IntVectorVector) std::vector<std::vector<int> >;
+VECTOR_AS_CSHARP_ARRAY(int, int, int, IntVector);
+JAGGED_MATRIX_AS_CSHARP_ARRAY(int, int, int, IntVectorVector);
+//REGULAR_MATRIX_AS_CSHARP_ARRAY(int, int, int, IntVectorVector);
+
+%template(Int64Vector) std::vector<int64_t>;
+%template(Int64VectorVector) std::vector<std::vector<int64_t> >;
+VECTOR_AS_CSHARP_ARRAY(int64_t, int64_t, long, Int64Vector);
+JAGGED_MATRIX_AS_CSHARP_ARRAY(int64_t, int64_t, long, Int64VectorVector);
+//REGULAR_MATRIX_AS_CSHARP_ARRAY(int64_t, int64_t, long, Int64VectorVector);
+
+%apply int64_t * INOUT { int64_t * marker };
 %apply int64_t * OUTPUT { int64_t *l, int64_t *u, int64_t *value };
 
 // Since knapsack_solver.i and constraint_solver.i both need to
@@ -462,22 +474,22 @@ namespace operations_research {
   Constraint* Member(const std::vector<int>& values) {
     return $self->solver()->MakeMemberCt($self->Var(), values);
   }
-  IntVar* IsEqual(IntExpr* const other) {
+  IntVar* IsEqual(IntExpr* other) {
     return $self->solver()->MakeIsEqualVar($self->Var(), other->Var());
   }
-  IntVar* IsDifferent(IntExpr* const other) {
+  IntVar* IsDifferent(IntExpr* other) {
     return $self->solver()->MakeIsDifferentVar($self->Var(), other->Var());
   }
-  IntVar* IsGreater(IntExpr* const other) {
+  IntVar* IsGreater(IntExpr* other) {
     return $self->solver()->MakeIsGreaterVar($self->Var(), other->Var());
   }
-  IntVar* IsGreaterOrEqual(IntExpr* const other) {
+  IntVar* IsGreaterOrEqual(IntExpr* other) {
     return $self->solver()->MakeIsGreaterOrEqualVar($self->Var(), other->Var());
   }
-  IntVar* IsLess(IntExpr* const other) {
+  IntVar* IsLess(IntExpr* other) {
     return $self->solver()->MakeIsLessVar($self->Var(), other->Var());
   }
-  IntVar* IsLessOrEqual(IntExpr* const other) {
+  IntVar* IsLessOrEqual(IntExpr* other) {
     return $self->solver()->MakeIsLessOrEqualVar($self->Var(), other->Var());
   }
   OptimizeVar* Minimize(int64_t step) {
@@ -702,8 +714,8 @@ namespace operations_research {
 // Ignored:
 // No custom wrapping for this method, we simply ignore it.
 %ignore SearchLog::SearchLog(
-    Solver* const s, OptimizeVar* const obj, IntVar* const var,
-    double scaling_factor, double offset,
+    Solver* solver, std::vector<IntVar*> vars, std::string vars_name,
+    std::vector<double> scaling_factors, std::vector<double> offsets,
     std::function<std::string()> display_callback,
     bool display_on_new_solutions_only, int period);
 // Methods:
@@ -826,7 +838,7 @@ namespace operations_research {
 %unignore IntVarLocalSearchFilter::Var;  // Inherited.
 // Extend IntVarLocalSearchFilter with an intuitive API.
 %extend IntVarLocalSearchFilter {
-  int Index(IntVar* const var) {
+  int Index(IntVar* var) {
     int64_t index = -1;
     $self->FindIndex(var, &index);
     return index;

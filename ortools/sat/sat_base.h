@@ -27,13 +27,13 @@
 #include <vector>
 
 #include "absl/base/attributes.h"
+#include "absl/log/check.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "ortools/base/integral_types.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/macros.h"
 #include "ortools/base/strong_vector.h"
+#include "ortools/base/types.h"
 #include "ortools/sat/model.h"
 #include "ortools/util/bitset.h"
 #include "ortools/util/strong_integers.h"
@@ -77,11 +77,18 @@ class Literal {
     CHECK_NE(signed_value, 0);
   }
 
-  Literal() {}
+  Literal() = default;
   explicit Literal(LiteralIndex index) : index_(index.value()) {}
   Literal(BooleanVariable variable, bool is_positive)
       : index_(is_positive ? (variable.value() << 1)
                            : (variable.value() << 1) ^ 1) {}
+
+  // We want a literal to be implicitly converted to a LiteralIndex().
+  // Before this, we used to have many literal.Index() that didn't add anything.
+  //
+  // TODO(user): LiteralIndex might not even be needed, but because of the
+  // signed value business, it is still safer with it.
+  operator LiteralIndex() const { return Index(); }  // NOLINT
 
   BooleanVariable Variable() const { return BooleanVariable(index_ >> 1); }
   bool IsPositive() const { return !(index_ & 1); }
@@ -99,12 +106,10 @@ class Literal {
   std::string DebugString() const {
     return absl::StrFormat("%+d", SignedValue());
   }
+
   bool operator==(Literal other) const { return index_ == other.index_; }
   bool operator!=(Literal other) const { return index_ != other.index_; }
-
-  bool operator<(const Literal& literal) const {
-    return Index() < literal.Index();
-  }
+  bool operator<(const Literal& other) const { return index_ < other.index_; }
 
  private:
   int index_;
@@ -135,8 +140,12 @@ inline std::ostream& operator<<(std::ostream& os,
 // Each variable can be unassigned or be assigned to true or false.
 class VariablesAssignment {
  public:
-  VariablesAssignment() {}
+  VariablesAssignment() = default;
   explicit VariablesAssignment(int num_variables) { Resize(num_variables); }
+
+  // This type is neither copyable nor movable.
+  VariablesAssignment(const VariablesAssignment&) = delete;
+  VariablesAssignment& operator=(const VariablesAssignment&) = delete;
   void Resize(int num_variables) {
     assignment_.Resize(LiteralIndex(num_variables << 1));
   }
@@ -190,7 +199,24 @@ class VariablesAssignment {
   // - If both are false, then the variable (and the literal) is unassigned.
   Bitset64<LiteralIndex> assignment_;
 
-  DISALLOW_COPY_AND_ASSIGN(VariablesAssignment);
+  friend class AssignmentView;
+};
+
+// For "hot" loop, it is better not to reload the Bitset64 pointer on each
+// check.
+class AssignmentView {
+ public:
+  explicit AssignmentView(const VariablesAssignment& assignment)
+      : view_(assignment.assignment_.const_view()) {}
+
+  bool LiteralIsFalse(Literal literal) const {
+    return view_[literal.NegatedIndex()];
+  }
+
+  bool LiteralIsTrue(Literal literal) const { return view_[literal.Index()]; }
+
+ private:
+  Bitset64<LiteralIndex>::ConstView view_;
 };
 
 // Forward declaration.
@@ -251,6 +277,10 @@ class Trail {
     current_info_.level = 0;
   }
 
+  // This type is neither copyable nor movable.
+  Trail(const Trail&) = delete;
+  Trail& operator=(const Trail&) = delete;
+
   void Resize(int num_variables);
 
   // Registers a propagator. This assigns a unique id to this propagator and
@@ -259,13 +289,19 @@ class Trail {
 
   // Enqueues the assignment that make the given literal true on the trail. This
   // should only be called on unassigned variables.
-  void Enqueue(Literal true_literal, int propagator_id) {
+  void SetCurrentPropagatorId(int propagator_id) {
+    current_info_.type = propagator_id;
+  }
+  void FastEnqueue(Literal true_literal) {
     DCHECK(!assignment_.VariableIsAssigned(true_literal.Variable()));
     trail_[current_info_.trail_index] = true_literal;
-    current_info_.type = propagator_id;
     info_[true_literal.Variable()] = current_info_;
     assignment_.AssignFromTrueLiteral(true_literal);
     ++current_info_.trail_index;
+  }
+  void Enqueue(Literal true_literal, int propagator_id) {
+    SetCurrentPropagatorId(propagator_id);
+    FastEnqueue(true_literal);
   }
 
   // Specific Enqueue() version for the search decision.
@@ -395,7 +431,7 @@ class Trail {
   int Index() const { return current_info_.trail_index; }
   // This accessor can return trail_.end(). operator[] cannot. This allows
   // normal std:vector operations, such as assign(begin, end).
-  const std::vector<Literal>::const_iterator IteratorAt(int index) const {
+  std::vector<Literal>::const_iterator IteratorAt(int index) const {
     return trail_.begin() + index;
   }
   const Literal& operator[](int index) const { return trail_[index]; }
@@ -467,8 +503,6 @@ class Trail {
 
   std::function<bool(absl::Span<const Literal> clause)> debug_checker_ =
       nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(Trail);
 };
 
 // Base class for all the SAT constraints.
@@ -476,7 +510,11 @@ class SatPropagator {
  public:
   explicit SatPropagator(const std::string& name)
       : name_(name), propagator_id_(-1), propagation_trail_index_(0) {}
-  virtual ~SatPropagator() {}
+
+  // This type is neither copyable nor movable.
+  SatPropagator(const SatPropagator&) = delete;
+  SatPropagator& operator=(const SatPropagator&) = delete;
+  virtual ~SatPropagator() = default;
 
   // Sets/Gets this propagator unique id.
   void SetPropagatorId(int id) { propagator_id_ = id; }
@@ -541,9 +579,6 @@ class SatPropagator {
   const std::string name_;
   int propagator_id_;
   int propagation_trail_index_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SatPropagator);
 };
 
 // ########################  Implementations below  ########################

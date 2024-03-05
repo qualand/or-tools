@@ -14,6 +14,7 @@
 #include "ortools/glop/primal_edge_norms.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 #include "ortools/base/timer.h"
 #include "ortools/lp_data/lp_utils.h"
@@ -49,14 +50,14 @@ bool PrimalEdgeNorms::NeedsBasisRefactorization() const {
   return recompute_edge_squared_norms_;
 }
 
-const DenseRow& PrimalEdgeNorms::GetSquaredNorms() {
+DenseRow::ConstView PrimalEdgeNorms::GetSquaredNorms() {
   switch (pricing_rule_) {
     case GlopParameters::DANTZIG:
-      return GetMatrixColumnNorms();
+      return GetMatrixColumnNorms().const_view();
     case GlopParameters::STEEPEST_EDGE:
-      return GetEdgeSquaredNorms();
+      return GetEdgeSquaredNorms().const_view();
     case GlopParameters::DEVEX:
-      return GetDevexWeights();
+      return GetDevexWeights().const_view();
   }
 }
 

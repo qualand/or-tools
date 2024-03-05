@@ -61,12 +61,37 @@ struct SolverResult {
   // See https://developers.google.com/optimization/lp/pdlp_math for the
   // interpretation of `dual_solution` and `reduced_costs`.
   Eigen::VectorXd dual_solution;
+  // NOTE: The definition of reduced_costs changed in OR-tools version 9.8.
+  // See
+  // https://developers.google.com/optimization/lp/pdlp_math#reduced_costs_dual_residuals_and_the_corrected_dual_objective
+  // for details.
   Eigen::VectorXd reduced_costs;
   SolveLog solve_log;
 };
 
+// Identifies the iteration type in a callback. The callback is called both for
+// intermediate iterations and upon termination.
+enum class IterationType {
+  // An intermediate iteration in the "main" phase.
+  kNormal,
+  // An intermediate iteration during a primal feasibility polishing phase.
+  kPrimalFeasibility,
+  // An intermediate iteration during a dual feasibility polishing phase.
+  kDualFeasibility,
+  // Terminating with a solution found by presolve.
+  kPresolveTermination,
+  // Terminating with a solution found by the "main" phase.
+  kNormalTermination,
+  // Terminating with a solution found by feasibility polishing.
+  kFeasibilityPolishingTermination,
+};
+
 struct IterationCallbackInfo {
+  IterationType iteration_type;
   TerminationCriteria termination_criteria;
+  // Note that if feasibility polishing is enabled, `iteration_stats` will only
+  // describe the iteration within the current phase (main, primal feasibility
+  // polishing, or dual feasibility polishing), and not the total work.
   IterationStats iteration_stats;
   QuadraticProgramBoundNorms bound_norms;
 };

@@ -35,7 +35,7 @@ package operations_research;
 // then the routing library will pick its preferred value for that parameter
 // automatically: this should be the case for most parameters.
 // To see those "default" parameters, call GetDefaultRoutingSearchParameters().
-// Next ID: 53
+// Next ID: 58
 message RoutingSearchParameters {
   // First solution strategies, used as starting point of local search.
   FirstSolutionStrategy.Value first_solution_strategy = 1;
@@ -123,9 +123,13 @@ message RoutingSearchParameters {
     // Order by increasing by cost(pickup) + cost(delivery).
     BEST_PICKUP_DELIVERY_PAIR_MULTITOUR = 3;
   }
-  // Choice of insertion strategy for pickup/delivery pairs,
-  // used in local cheapest insertion, both first solution heuristic and LNS.
+  // Choice of insertion strategy for pickup/delivery pairs, used in local
+  // cheapest insertion, both first solution heuristic and LNS.
   PairInsertionStrategy local_cheapest_insertion_pickup_delivery_strategy = 49;
+  // Choice of insertion strategy for pickup/delivery pairs, used in local
+  // cheapest cost insertion, both first solution heuristic and LNS.
+  PairInsertionStrategy local_cheapest_cost_insertion_pickup_delivery_strategy =
+      55;
 
   // If true use minimum matching instead of minimal matching in the
   // Christofides algorithm.
@@ -397,6 +401,12 @@ message RoutingSearchParameters {
   }
   LocalSearchNeighborhoodOperators local_search_operators = 3;
 
+  // Neighbors ratio and minimum number of neighbors considered in local
+  // search operators (see cheapest_insertion_first_solution_neighbors_ratio
+  // and cheapest_insertion_first_solution_min_neighbors for more information).
+  double ls_operator_neighbors_ratio = 53;
+  int32 ls_operator_min_neighbors = 54;
+
   // If true, the solver will use multi-armed bandit concatenate operators. It
   // dynamically chooses the next neighbor operator in order to get the best
   // objective improvement.
@@ -463,6 +473,9 @@ message RoutingSearchParameters {
   // If use_cp_sat or use_generalized_cp_sat is true, contains the SAT algorithm
   // parameters which will be used.
   sat.SatParameters sat_parameters = 48;
+  // If use_cp_sat or use_generalized_cp_sat is true, will report intermediate
+  // solutions found by CP-SAT to solution listeners.
+  bool report_intermediate_cp_sat_solutions = 56;
   // If model.Size() is less than the threshold and that no solution has been
   // found, attempt a pass with CP-SAT.
   int32 fallback_to_cp_sat_size_threshold = 52;
@@ -494,6 +507,13 @@ message RoutingSearchParameters {
   // Limit to the time spent in the completion search for each local search
   // neighbor.
   google.protobuf.Duration lns_time_limit = 10;
+  // Ratio of the overall time limit spent in a secondary LS phase with only
+  // intra-route and insertion operators, meant to "cleanup" the current
+  // solution before stopping the search.
+  // TODO(user): Since these operators are very fast, add a parameter to cap
+  // the max time allocated for this second phase (e.g.
+  // Duration max_secondary_ls_time_limit).
+  double secondary_ls_time_limit_ratio = 57;
 
   // Parameters required for the improvement search limit.
   message ImprovementSearchLimitParameters {

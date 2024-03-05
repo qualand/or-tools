@@ -13,6 +13,8 @@
 
 #include "ortools/sat/linear_propagation.h"
 
+#include <stdint.h>
+
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -20,6 +22,24 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/inlined_vector.h"
+#include "absl/log/check.h"
+#include "absl/numeric/int128.h"
+#include "absl/strings/str_cat.h"
+#include "absl/types/span.h"
+#include "ortools/base/logging.h"
+#include "ortools/base/stl_util.h"
+#include "ortools/base/strong_vector.h"
+#include "ortools/sat/integer.h"
+#include "ortools/sat/model.h"
+#include "ortools/sat/sat_base.h"
+#include "ortools/sat/sat_solver.h"
+#include "ortools/sat/synchronization.h"
+#include "ortools/util/bitset.h"
+#include "ortools/util/strong_integers.h"
+#include "ortools/util/time_limit.h"
 
 namespace operations_research {
 namespace sat {
@@ -1065,9 +1085,11 @@ bool LinearPropagator::DisassembleSubtree(int root_id, int num_pushed) {
 
   // We try to keep the same order as before for the elements not in the
   // topological order.
-  propagation_queue_.SortByPos(
-      absl::MakeSpan(&tmp_to_reorder_[important_size],
-                     tmp_to_reorder_.size() - important_size));
+  if (important_size < tmp_to_reorder_.size()) {
+    propagation_queue_.SortByPos(
+        absl::MakeSpan(&tmp_to_reorder_[important_size],
+                       tmp_to_reorder_.size() - important_size));
+  }
 
   num_reordered_ += tmp_to_reorder_.size();
   propagation_queue_.Reorder(tmp_to_reorder_);

@@ -21,16 +21,18 @@
 #include <string>
 #include <vector>
 
-#include "ortools/base/integral_types.h"
-#include "ortools/base/logging.h"
 #if !defined(__PORTABLE_PLATFORM__)
-#include "google/protobuf/text_format.h"
 #include "ortools/base/helpers.h"
 #endif  // !defined(__PORTABLE_PLATFORM__)
-#include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
+#include "absl/status/status.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
+#include "google/protobuf/message.h"
+#include "google/protobuf/text_format.h"
 #include "ortools/base/hash.h"
+#include "ortools/base/options.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/util/sorted_interval_list.h"
 
@@ -50,6 +52,14 @@ inline int EnforcementLiteral(const ConstraintProto& ct) {
   return ct.enforcement_literal(0);
 }
 
+// Returns the gcd of the given LinearExpressionProto.
+// Specifying the second argument will take the gcd with it.
+int64_t LinearExpressionGcd(const LinearExpressionProto& expr, int64_t gcd = 0);
+
+// Divide the expression in place by 'divisor'.
+// It will DCHECK that 'divisor' divides all constants.
+void DivideLinearExpression(int64_t divisor, LinearExpressionProto* expr);
+
 // Fills the target as negated ref.
 void SetToNegatedLinearExpression(const LinearExpressionProto& input_expr,
                                   LinearExpressionProto* output_negated_expr);
@@ -63,6 +73,9 @@ struct IndexReferences {
   std::vector<int> literals;
 };
 IndexReferences GetReferencesUsedByConstraint(const ConstraintProto& ct);
+void GetReferencesUsedByConstraint(const ConstraintProto& ct,
+                                   std::vector<int>* variables,
+                                   std::vector<int>* literals);
 
 // Applies the given function to all variables/literals/intervals indices of the
 // constraint. This function is used in a few places to have a "generic" code
@@ -76,7 +89,8 @@ void ApplyToAllIntervalIndices(const std::function<void(int*)>& function,
 
 // Returns the name of the ConstraintProto::ConstraintCase oneof enum.
 // Note(user): There is no such function in the proto API as of 16/01/2017.
-std::string ConstraintCaseName(ConstraintProto::ConstraintCase constraint_case);
+absl::string_view ConstraintCaseName(
+    ConstraintProto::ConstraintCase constraint_case);
 
 // Returns the sorted list of variables used by a constraint.
 // Note that this include variable used as a literal.
@@ -84,6 +98,14 @@ std::vector<int> UsedVariables(const ConstraintProto& ct);
 
 // Returns the sorted list of interval used by a constraint.
 std::vector<int> UsedIntervals(const ConstraintProto& ct);
+
+// Insert variables in a constraint into a set.
+template <typename Set>
+void InsertVariablesFromConstraint(const CpModelProto& model_proto, int index,
+                                   Set& output) {
+  const ConstraintProto& ct = model_proto.constraints(index);
+  for (const int var : UsedVariables(ct)) output.insert(var);
+}
 
 // Returns true if a proto.domain() contain the given value.
 // The domain is expected to be encoded as a sorted disjoint interval list.
@@ -192,6 +214,11 @@ void AddLinearExpressionToLinearConstraint(const LinearExpressionProto& expr,
                                            int64_t coefficient,
                                            LinearConstraintProto* linear);
 
+// Same method, but returns if the addition was possible without overflowing.
+bool SafeAddLinearExpressionToLinearConstraint(
+    const LinearExpressionProto& expr, int64_t coefficient,
+    LinearConstraintProto* linear);
+
 // Returns true iff a == b * b_scaling.
 bool LinearExpressionProtosAreEqual(const LinearExpressionProto& a,
                                     const LinearExpressionProto& b,
@@ -204,6 +231,7 @@ constexpr uint64_t kDefaultFingerprintSeed = 0xa5b85c5e198ed849;
 template <class T>
 inline uint64_t FingerprintRepeatedField(
     const google::protobuf::RepeatedField<T>& sequence, uint64_t seed) {
+  if (sequence.empty()) return seed;
   return fasthash64(reinterpret_cast<const char*>(sequence.data()),
                     sequence.size() * sizeof(T), seed);
 }
@@ -248,7 +276,8 @@ bool WriteModelProtoToFile(const M& proto, absl::string_view filename) {
 #if defined(__PORTABLE_PLATFORM__)
   return false;
 #else   // !defined(__PORTABLE_PLATFORM__)
-  if (absl::EndsWith(filename, "txt")) {
+  if (absl::EndsWith(filename, "txt") ||
+      absl::EndsWith(filename, "textproto")) {
     std::string proto_string;
     google::protobuf::TextFormat::Printer printer;
     SetupTextFormatPrinter(&printer);
@@ -258,6 +287,58 @@ bool WriteModelProtoToFile(const M& proto, absl::string_view filename) {
     return file::SetBinaryProto(filename, proto, file::Defaults()).ok();
   }
 #endif  // !defined(__PORTABLE_PLATFORM__)
+}
+
+// hashing support.
+//
+// Currently limited to a few inner types of ConstraintProto.
+inline bool operator==(const BoolArgumentProto& lhs,
+                       const BoolArgumentProto& rhs) {
+  if (absl::MakeConstSpan(lhs.literals()) !=
+      absl::MakeConstSpan(rhs.literals())) {
+    return false;
+  }
+  if (lhs.literals_size() != rhs.literals_size()) return false;
+  for (int i = 0; i < lhs.literals_size(); ++i) {
+    if (lhs.literals(i) != rhs.literals(i)) return false;
+  }
+  return true;
+}
+
+template <typename H>
+H AbslHashValue(H h, const BoolArgumentProto& m) {
+  for (const int lit : m.literals()) {
+    h = H::combine(std::move(h), lit);
+  }
+  return h;
+}
+
+inline bool operator==(const LinearConstraintProto& lhs,
+                       const LinearConstraintProto& rhs) {
+  if (absl::MakeConstSpan(lhs.vars()) != absl::MakeConstSpan(rhs.vars())) {
+    return false;
+  }
+  if (absl::MakeConstSpan(lhs.coeffs()) != absl::MakeConstSpan(rhs.coeffs())) {
+    return false;
+  }
+  if (absl::MakeConstSpan(lhs.domain()) != absl::MakeConstSpan(rhs.domain())) {
+    return false;
+  }
+  return true;
+}
+
+template <typename H>
+H AbslHashValue(H h, const LinearConstraintProto& m) {
+  for (const int var : m.vars()) {
+    h = H::combine(std::move(h), var);
+  }
+  for (const int64_t coeff : m.coeffs()) {
+    h = H::combine(std::move(h), coeff);
+  }
+  for (const int64_t bound : m.domain()) {
+    h = H::combine(std::move(h), bound);
+  }
+  return h;
 }
 
 }  // namespace sat

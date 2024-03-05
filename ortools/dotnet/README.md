@@ -31,7 +31,7 @@ need:
 * .Net Core 3.1 LTS SDK
 * .Net 6.0 LTS SDK
 
-note: We won't/can't rely on VS 2019 since we want a portable cross-platform
+note: We won't/can't rely on VS 2022 since we want a portable cross-platform
 [`dotnet/cli`](https://github.com/dotnet/cli) pipeline.
 
 ## Project Layout
@@ -58,8 +58,8 @@ naming, it is very difficult to get ownership on it, so you should prefer to use
 
 Either use the CMake base build or the Makefile based build. The workflow is
 typically `make dotnet` which will build both C# and F# libraries package. The
-output will be placed in `<buid_dir>/dotnet/packages` folder. All tests will
-be run based on this folder.
+output will be placed in `<build_dir>/dotnet/packages` folder. All tests will be
+run based on this folder.
 
 ### Build Process
 

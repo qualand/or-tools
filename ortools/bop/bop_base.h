@@ -20,12 +20,14 @@
 #include <string>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
 #include "absl/strings/string_view.h"
 #include "absl/synchronization/mutex.h"
-#include "ortools/base/basictypes.h"
+#include "ortools/base/macros.h"
 #include "ortools/base/strong_vector.h"
 #include "ortools/bop/bop_parameters.pb.h"
 #include "ortools/bop/bop_solution.h"
+#include "ortools/bop/bop_types.h"
 #include "ortools/lp_data/lp_types.h"
 #include "ortools/sat/boolean_problem.pb.h"
 #include "ortools/sat/clause.h"
@@ -36,9 +38,9 @@
 namespace operations_research {
 namespace bop {
 
+class ProblemState;
 // Forward declaration.
 struct LearnedInfo;
-class ProblemState;
 
 // Base class used to optimize a ProblemState.
 // Optimizers implementing this class are used in a sort of portfolio and
@@ -118,6 +120,10 @@ class ProblemState {
  public:
   explicit ProblemState(const sat::LinearBooleanProblem& problem);
 
+  // This type is neither copyable nor movable.
+  ProblemState(const ProblemState&) = delete;
+  ProblemState& operator=(const ProblemState&) = delete;
+
   // Sets parameters, used for instance to get the tolerance, the gap limit...
   void SetParameters(const BopParameters& parameters) {
     parameters_ = parameters;
@@ -130,7 +136,7 @@ class ProblemState {
   void set_assignment_preference(const std::vector<bool>& a) {
     assignment_preference_ = a;
   }
-  const std::vector<bool> assignment_preference() const {
+  std::vector<bool> assignment_preference() const {
     return assignment_preference_;
   }
 
@@ -240,8 +246,6 @@ class ProblemState {
 
   // Manage the set of the problem binary clauses (including the learned ones).
   sat::BinaryClauseManager binary_clause_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProblemState);
 };
 
 // This struct represents what has been learned on the problem state by

@@ -31,7 +31,6 @@
 
 #include "absl/flags/flag.h"
 #include "absl/log/check.h"
-#include "ortools/base/integral_types.h"
 #include "ortools/base/vlog_is_on.h"
 
 // Log only in verbose mode.
@@ -40,6 +39,9 @@
 
 #define VLOG_EVERY_N(verboselevel, n) \
   LOG_IF_EVERY_N(INFO, VLOG_IS_ON(verboselevel), n)
+
+#define VLOG_EVERY_N_SEC(verboselevel, n) \
+  LOG_IF_EVERY_N_SEC(INFO, VLOG_IS_ON(verboselevel), n)
 
 #if defined(DEBUG_MODE)
 #define DVLOG(verboselevel) VLOG(verboselevel)
